@@ -20,6 +20,92 @@ import { useUser } from '../contexts/UserContext';
 import { useGame } from '../contexts/GameContext';
 import { GameState } from '../types';
 
+// 게임 상태 대시보드 컴포넌트 추가
+const GameStatusDashboard: React.FC<{ gameState: GameState }> = ({ gameState }) => {
+  const { phase, day, nightPhase, votingResults, players, nightActions } = gameState;
+  
+  // 살아있는 플레이어 수
+  const alivePlayers = players.filter(p => p.isAlive);
+  const aliveCount = alivePlayers.length;
+  
+  // 마피아 수
+  const aliveMafia = alivePlayers.filter(p => p.role === 'mafia');
+  const mafiaCount = aliveMafia.length;
+  
+  // 시민 수 (의사, 경찰 포함)
+  const citizenCount = aliveCount - mafiaCount;
+  
+  // 투표 참여 수
+  const votedCount = Object.keys(votingResults).length;
+  const notVotedCount = phase === 'day-voting' ? aliveCount - votedCount : 0;
+  
+  // 밤 행동 상태
+  let nightActionStatus = '';
+  let nightActionComplete = false;
+  
+  if (phase === 'night') {
+    if (nightPhase === 'doctor') {
+      const doctorPlayers = alivePlayers.filter(p => p.role === 'doctor');
+      const doctorActed = nightActions.doctorSave !== null;
+      nightActionStatus = '의사 행동 중';
+      nightActionComplete = doctorActed || doctorPlayers.length === 0;
+    } else if (nightPhase === 'police') {
+      const policePlayers = alivePlayers.filter(p => p.role === 'police');
+      const policeActed = nightActions.policeCheck.targetId !== null;
+      nightActionStatus = '경찰 조사 중';
+      nightActionComplete = policeActed || policePlayers.length === 0;
+    } else if (nightPhase === 'mafia') {
+      const mafiaPlayers = alivePlayers.filter(p => p.role === 'mafia');
+      const mafiaActed = nightActions.mafiaKill !== null;
+      nightActionStatus = '마피아 살인 중';
+      nightActionComplete = mafiaActed || mafiaPlayers.length === 0;
+    }
+  }
+  
+  return (
+    <Card style={{ marginBottom: '20px', padding: '15px' }}>
+      <Subtitle>게임 상태</Subtitle>
+      <Grid style={{ gridTemplateColumns: 'repeat(3, 1fr)', gap: '10px' }}>
+        <div>
+          <Text style={{ fontWeight: 'bold' }}>현재 단계</Text>
+          <Badge variant="primary" style={{ display: 'block', margin: '5px 0' }}>
+            {phase === 'day-discussion' && '낮 토론'}
+            {phase === 'day-voting' && '낮 투표'}
+            {phase === 'vote-result' && '투표 결과'}
+            {phase === 'night' && '밤 ' + nightActionStatus}
+            {phase === 'game-over' && '게임 종료'}
+          </Badge>
+        </div>
+        <div>
+          <Text style={{ fontWeight: 'bold' }}>생존자</Text>
+          <Badge variant="success" style={{ display: 'block', margin: '5px 0' }}>
+            시민팀: {citizenCount}명
+          </Badge>
+          <Badge variant="danger" style={{ display: 'block', margin: '5px 0' }}>
+            마피아: {mafiaCount}명
+          </Badge>
+        </div>
+        <div>
+          <Text style={{ fontWeight: 'bold' }}>진행 상황</Text>
+          <Badge variant="secondary" style={{ display: 'block', margin: '5px 0' }}>
+            {day}일차
+          </Badge>
+          {phase === 'day-voting' && (
+            <Badge variant={notVotedCount > 0 ? 'warning' : 'success'} style={{ display: 'block', margin: '5px 0' }}>
+              투표 {votedCount}/{aliveCount}명 완료
+            </Badge>
+          )}
+          {phase === 'night' && (
+            <Badge variant={nightActionComplete ? 'success' : 'warning'} style={{ display: 'block', margin: '5px 0' }}>
+              {nightActionComplete ? '행동 완료' : '행동 대기 중'}
+            </Badge>
+          )}
+        </div>
+      </Grid>
+    </Card>
+  );
+};
+
 const GamePage: React.FC = () => {
   const navigate = useNavigate();
   const { user } = useUser();
@@ -377,11 +463,34 @@ const GamePage: React.FC = () => {
     );
   };
   
+  // 플레이어가 행동을 완료했는지 확인하는 함수
+  const hasPlayerActedInNight = (playerId: string): boolean => {
+    if (!gameState || gameState.phase !== 'night') return false;
+    
+    const player = getPlayerById(playerId);
+    if (!player || !player.isAlive) return false;
+    
+    if (gameState.nightPhase === 'doctor' && player.role === 'doctor') {
+      return gameState.nightActions.doctorSave !== null;
+    }
+    if (gameState.nightPhase === 'police' && player.role === 'police') {
+      return gameState.nightActions.policeCheck.targetId !== null;
+    }
+    if (gameState.nightPhase === 'mafia' && player.role === 'mafia') {
+      return gameState.nightActions.mafiaKill !== null;
+    }
+    
+    return false;
+  };
+  
   return (
     <Container>
       <Card>
         <Title>마피아 게임</Title>
         <GameTimer seconds={gameState.timer} phase={gameState.phase} />
+        
+        {/* 게임 상태 대시보드 추가 */}
+        <GameStatusDashboard gameState={gameState} />
         
         <Text style={{ textAlign: 'center', fontSize: '18px', marginBottom: '20px' }}>
           {getPhaseDescription()}
@@ -467,6 +576,10 @@ const GamePage: React.FC = () => {
                   isMafia={shouldShowMafiaIndicator(p.id)}
                   isSelectable={canPerformAction() && p.id !== player.id && p.isAlive}
                   showRole={isGameOver || p.id === player.id}
+                  hasVoted={
+                    (isDayVoting && Object.keys(gameState.votingResults).includes(p.id)) || 
+                    (isNight && hasPlayerActedInNight(p.id))
+                  }
                 />
               ))}
             </Grid>

@@ -9,6 +9,7 @@ interface PlayerCardProps {
   isSelectable?: boolean;
   isSelected?: boolean;
   isMafia?: boolean;
+  hasVoted?: boolean;
   onClick?: () => void;
 }
 
@@ -66,6 +67,7 @@ const PlayerCard: React.FC<PlayerCardProps> = ({
   isSelectable = false,
   isSelected = false,
   isMafia = false,
+  hasVoted = false,
   onClick,
 }) => {
   const { name, role, isAlive, isHost, isAI, aiDifficulty } = player;
@@ -96,6 +98,7 @@ const PlayerCard: React.FC<PlayerCardProps> = ({
           {showRole && <Badge variant="primary">{getRoleText(role)}</Badge>}
           {isMafia && !showRole && <Badge variant="danger">마피아</Badge>}
           {isAI && <Badge variant="secondary">AI {aiDifficulty && `(${getAIDifficultyText(aiDifficulty)})`}</Badge>}
+          {hasVoted && isAlive && <Badge variant="success">투표완료</Badge>}
         </FlexRow>
       </div>
     </StyledPlayerCard>
