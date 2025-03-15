@@ -2,7 +2,7 @@ import express from 'express';
 import http from 'http';
 import { Server } from 'socket.io';
 import cors from 'cors';
-import { GameState, Player, ChatMessage, PlayerRole, AIDifficulty } from './types';
+import { GameState, Player, ChatMessage, PlayerRole, AIDifficulty, RoomInfo } from './types';
 import { createAIPlayer, generateAIChatMessage, selectAIVoteTarget, selectAINightActionTarget } from './aiUtils';
 
 const app = express();
@@ -46,7 +46,7 @@ io.on('connection', (socket) => {
     const userId = socket.id;
     console.log(`사용자 로그인: ${username} (ID: ${userId})`);
     callback({ userId, username });
-  });
+  }); 
 
   // 방 생성
   socket.on('create_room', ({ roomName }, callback) => {
@@ -306,6 +306,20 @@ io.on('connection', (socket) => {
         console.log(`AI 플레이어 ${aiPlayer.name}가 방 ${roomId}에서 제거됨`);
       }
     }
+  });
+
+  // 방 목록 가져오기
+  socket.on('get_rooms', ({}, callback) => {
+    // 방 정보 형식으로 변환
+    const roomInfoList: RoomInfo[] = Object.values(rooms).map(room => ({
+      id: room.id,
+      name: `방 ${room.id.substring(5)}`, // room-timestamp에서 timestamp 부분만 사용
+      playerCount: room.players.length,
+      maxPlayers: 8, // 최대 플레이어 수
+      status: room.phase === 'waiting' ? 'waiting' : 'playing'
+    }));
+    
+    callback({ rooms: roomInfoList });
   });
 
   // 연결 해제
