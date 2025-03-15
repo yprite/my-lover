@@ -11,6 +11,7 @@ export type GamePhase =
   | 'night' 
   | 'day-discussion' 
   | 'day-voting' 
+  | 'vote-result'
   | 'game-over';
 
 export type AIDifficulty = 'easy' | 'medium' | 'hard';

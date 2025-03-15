@@ -19,7 +19,7 @@ const io = new Server(server, {
 interface Room {
   id: string;
   players: Player[];
-  phase: 'waiting' | 'night' | 'day-discussion' | 'day-voting' | 'game-over';
+  phase: 'waiting' | 'night' | 'day-discussion' | 'day-voting' | 'vote-result' | 'game-over';
   nightPhase: 'doctor' | 'police' | 'mafia' | null;
   day: number;
   winner: 'citizens' | 'mafia' | null;
@@ -436,7 +436,7 @@ io.on('connection', (socket) => {
 });
 
 // 타이머 관리
-function startTimer(roomId: string) {
+function startTimer(roomId: string, callback?: () => void) {
   const room = rooms[roomId];
   if (!room || room.timer === null) return;
   
@@ -451,58 +451,161 @@ function startTimer(roomId: string) {
       if (room.timer === 0) {
         clearInterval(timerId);
         
+        // 콜백 함수가 있으면 실행
+        if (callback) {
+          callback();
+          return;
+        }
+        
         // 타이머가 끝났을 때 다음 단계로 진행
         if (room.phase === 'day-discussion') {
           startVotingPhase(roomId);
         } else if (room.phase === 'day-voting') {
-          processVotingResults(roomId);
+          // 투표 단계에서는 타이머가 끝나도 자동으로 다음 단계로 넘어가지 않음
+          // 대신 투표하지 않은 플레이어에게 메시지를 보냄
+          const alivePlayers = room.players.filter(p => p.isAlive);
+          const votedPlayers = Object.keys(room.votingResults);
+          const notVotedPlayers = alivePlayers.filter(p => !votedPlayers.includes(p.id));
+          
+          if (notVotedPlayers.length > 0) {
+            const message: ChatMessage = {
+              id: `msg-${Date.now()}`,
+              senderId: 'system',
+              senderName: '시스템',
+              content: `투표 시간이 종료되었습니다. 아직 ${notVotedPlayers.length}명의 플레이어가 투표하지 않았습니다. 모든 플레이어가 투표를 완료해야 다음 단계로 넘어갑니다.`,
+              timestamp: Date.now(),
+              isSystemMessage: true,
+            };
+            
+            room.messages.push(message);
+            io.to(roomId).emit('new_message', { message, gameState: room });
+            
+            // 타이머를 30초로 재설정
+            room.timer = 30;
+            startTimer(roomId);
+          } else {
+            // 모든 플레이어가 투표했다면 결과 처리
+            processVotingResults(roomId);
+          }
+        } else if (room.phase === 'vote-result') {
+          // 투표 결과 단계 종료 후 밤 단계로 전환
+          startNightPhase(roomId);
         } else if (room.phase === 'night') {
           // 밤 단계 진행
           if (room.nightPhase === 'doctor') {
-            // 의사 단계 종료, 경찰 단계 시작
-            room.nightPhase = 'police';
-            room.timer = 10; // 경찰 10초로 변경
+            // 의사 단계에서는 타이머가 끝나도 자동으로 다음 단계로 넘어가지 않음
+            // 의사가 없거나 의사가 행동을 완료한 경우에만 다음 단계로 넘어감
+            const doctorPlayers = room.players.filter(p => p.isAlive && p.role === 'doctor');
             
-            const message: ChatMessage = {
-              id: `msg-${Date.now()}`,
-              senderId: 'system',
-              senderName: '시스템',
-              content: '경찰이 시민을 조사하고 있습니다.',
-              timestamp: Date.now(),
-              isSystemMessage: true,
-            };
-            room.messages.push(message);
-            
-            io.to(roomId).emit('night_phase_changed', { 
-              gameState: room,
-              nightPhase: 'police'
-            });
-            
-            startTimer(roomId);
+            if (doctorPlayers.length === 0 || room.nightActions.doctorSave !== null) {
+              // 의사 단계 종료, 경찰 단계 시작
+              room.nightPhase = 'police';
+              room.timer = 30; // 경찰 30초로 변경
+              
+              const message: ChatMessage = {
+                id: `msg-${Date.now()}`,
+                senderId: 'system',
+                senderName: '시스템',
+                content: '경찰이 시민을 조사하고 있습니다.',
+                timestamp: Date.now(),
+                isSystemMessage: true,
+              };
+              room.messages.push(message);
+              
+              io.to(roomId).emit('night_phase_changed', { 
+                gameState: room,
+                nightPhase: 'police'
+              });
+              
+              startTimer(roomId);
+            } else {
+              // 의사가 행동을 완료하지 않았다면 메시지를 보내고 타이머 재설정
+              const message: ChatMessage = {
+                id: `msg-${Date.now()}`,
+                senderId: 'system',
+                senderName: '시스템',
+                content: '의사가 아직 행동을 완료하지 않았습니다. 의사는 빨리 행동을 완료해주세요.',
+                timestamp: Date.now(),
+                isSystemMessage: true,
+              };
+              
+              room.messages.push(message);
+              io.to(roomId).emit('new_message', { message, gameState: room });
+              
+              // 타이머를 15초로 재설정
+              room.timer = 15;
+              startTimer(roomId);
+            }
           } else if (room.nightPhase === 'police') {
-            // 경찰 단계 종료, 마피아 단계 시작
-            room.nightPhase = 'mafia';
-            room.timer = 10; // 마피아 10초로 변경
+            // 경찰 단계에서는 타이머가 끝나도 자동으로 다음 단계로 넘어가지 않음
+            // 경찰이 없거나 경찰이 행동을 완료한 경우에만 다음 단계로 넘어감
+            const policePlayers = room.players.filter(p => p.isAlive && p.role === 'police');
             
-            const message: ChatMessage = {
-              id: `msg-${Date.now()}`,
-              senderId: 'system',
-              senderName: '시스템',
-              content: '마피아가 선량한 시민을 죽이려 하고 있습니다.',
-              timestamp: Date.now(),
-              isSystemMessage: true,
-            };
-            room.messages.push(message);
-            
-            io.to(roomId).emit('night_phase_changed', { 
-              gameState: room,
-              nightPhase: 'mafia'
-            });
-            
-            startTimer(roomId);
+            if (policePlayers.length === 0 || room.nightActions.policeCheck.targetId !== null) {
+              // 경찰 단계 종료, 마피아 단계 시작
+              room.nightPhase = 'mafia';
+              room.timer = 30; // 마피아 30초로 변경
+              
+              const message: ChatMessage = {
+                id: `msg-${Date.now()}`,
+                senderId: 'system',
+                senderName: '시스템',
+                content: '마피아가 선량한 시민을 죽이려 하고 있습니다.',
+                timestamp: Date.now(),
+                isSystemMessage: true,
+              };
+              room.messages.push(message);
+              
+              io.to(roomId).emit('night_phase_changed', { 
+                gameState: room,
+                nightPhase: 'mafia'
+              });
+              
+              startTimer(roomId);
+            } else {
+              // 경찰이 행동을 완료하지 않았다면 메시지를 보내고 타이머 재설정
+              const message: ChatMessage = {
+                id: `msg-${Date.now()}`,
+                senderId: 'system',
+                senderName: '시스템',
+                content: '경찰이 아직 행동을 완료하지 않았습니다. 경찰은 빨리 행동을 완료해주세요.',
+                timestamp: Date.now(),
+                isSystemMessage: true,
+              };
+              
+              room.messages.push(message);
+              io.to(roomId).emit('new_message', { message, gameState: room });
+              
+              // 타이머를 15초로 재설정
+              room.timer = 15;
+              startTimer(roomId);
+            }
           } else if (room.nightPhase === 'mafia') {
-            // 마피아 단계 종료, 밤 행동 처리
-            processNightActions(roomId);
+            // 마피아 단계에서는 타이머가 끝나도 자동으로 다음 단계로 넘어가지 않음
+            // 마피아가 없거나 마피아가 행동을 완료한 경우에만 다음 단계로 넘어감
+            const mafiaPlayers = room.players.filter(p => p.isAlive && p.role === 'mafia');
+            
+            if (mafiaPlayers.length === 0 || room.nightActions.mafiaKill !== null) {
+              // 마피아 단계 종료, 밤 행동 처리
+              processNightActions(roomId);
+            } else {
+              // 마피아가 행동을 완료하지 않았다면 메시지를 보내고 타이머 재설정
+              const message: ChatMessage = {
+                id: `msg-${Date.now()}`,
+                senderId: 'system',
+                senderName: '시스템',
+                content: '마피아가 아직 행동을 완료하지 않았습니다. 마피아는 빨리 행동을 완료해주세요.',
+                timestamp: Date.now(),
+                isSystemMessage: true,
+              };
+              
+              room.messages.push(message);
+              io.to(roomId).emit('new_message', { message, gameState: room });
+              
+              // 타이머를 15초로 재설정
+              room.timer = 15;
+              startTimer(roomId);
+            }
           }
         }
       }
@@ -531,6 +634,10 @@ function handleAIActions(roomId: string) {
     case 'day-voting':
       // 투표 단계에서는 AI가 투표를 함
       handleAIVoting(room, aiPlayers);
+      break;
+      
+    case 'vote-result':
+      // 투표 결과 단계에서는 AI가 아무 행동도 하지 않음
       break;
       
     case 'night':
@@ -612,8 +719,8 @@ function handleAIVoting(room: Room, aiPlayers: Player[]) {
     const voteChance = aiPlayer.aiDifficulty === 'easy' ? 0.03 : 
                       aiPlayer.aiDifficulty === 'medium' ? 0.05 : 0.08;
     
-    // 타이머가 10초 이하로 남았다면 무조건 투표
-    const shouldVote = room.timer !== null && room.timer <= 10 ? true : Math.random() < voteChance;
+    // 타이머가 5초 이하로 남았다면 무조건 투표
+    const shouldVote = room.timer !== null && room.timer <= 5 ? true : Math.random() < voteChance;
     
     if (shouldVote) {
       const targetId = selectAIVoteTarget(aiPlayer, gameState);
@@ -909,14 +1016,14 @@ function startVotingPhase(roomId: string) {
   if (!room) return;
   
   room.phase = 'day-voting';
-  room.timer = 10; // 10초 투표 시간으로 변경
+  room.timer = 60; // 60초 투표 시간으로 변경 (충분한 시간 제공)
   room.votingResults = {};
   
   const message: ChatMessage = {
     id: `msg-${Date.now()}`,
     senderId: 'system',
     senderName: '시스템',
-    content: '투표 시간입니다. 처형할 사람을 선택하세요.',
+    content: '투표 시간입니다. 처형할 사람을 선택하세요. 모든 플레이어가 투표를 완료하면 다음 단계로 넘어갑니다.',
     timestamp: Date.now(),
     isSystemMessage: true,
   };
@@ -958,60 +1065,95 @@ function processVotingResults(roomId: string) {
     executedPlayerId = null; // 동점인 경우 처형 없음
   }
   
-  // 처형 결과 메시지 표시
+  // 투표 결과 메시지 생성
   const messages: ChatMessage[] = [];
   
+  // 투표 결과 요약 메시지 추가
+  const voteResultMessage = Object.entries(voteCounts)
+    .sort((a, b) => b[1] - a[1]) // 득표수 내림차순 정렬
+    .map(([playerId, votes]) => {
+      const player = room.players.find(p => p.id === playerId);
+      return player ? `${player.name}: ${votes}표` : '';
+    })
+    .filter(text => text) // 빈 문자열 제거
+    .join(', ');
+  
+  messages.push({
+    id: `msg-${Date.now()}`,
+    senderId: 'system',
+    senderName: '시스템',
+    content: `투표 결과: ${voteResultMessage}`,
+    timestamp: Date.now(),
+    isSystemMessage: true,
+  });
+  
+  // 처형 결과 메시지 추가
   if (executedPlayerId) {
     const executedPlayer = room.players.find(p => p.id === executedPlayerId);
     if (executedPlayer) {
       executedPlayer.isAlive = false;
       
       messages.push({
-        id: `msg-${Date.now()}`,
+        id: `msg-${Date.now() + 1}`,
         senderId: 'system',
         senderName: '시스템',
         content: `${executedPlayer.name}님이 투표로 처형되었습니다. 역할은 ${getRoleText(executedPlayer.role)}였습니다.`,
-        timestamp: Date.now(),
+        timestamp: Date.now() + 1,
         isSystemMessage: true,
       });
     }
   } else {
     messages.push({
-      id: `msg-${Date.now()}`,
+      id: `msg-${Date.now() + 1}`,
       senderId: 'system',
       senderName: '시스템',
       content: '투표가 동점이거나 없어 아무도 처형되지 않았습니다.',
-      timestamp: Date.now(),
+      timestamp: Date.now() + 1,
       isSystemMessage: true,
     });
   }
   
   room.messages = [...room.messages, ...messages];
   
-  // 승리 조건 확인
-  checkWinCondition(roomId);
+  // 투표 결과 발표 단계로 전환
+  room.phase = 'vote-result';
+  room.timer = 10; // 10초 동안 결과 표시
   
-  if (!room.winner) {
-    // 밤 단계로 전환
-    room.phase = 'night';
-    room.nightPhase = 'doctor'; // 의사부터 시작
-    room.day++;
-    room.timer = 10; // 의사 10초로 변경
+  // 투표 결과 정보를 클라이언트에 전송
+  io.to(roomId).emit('vote_result', { 
+    gameState: room,
+    voteCounts: voteCounts,
+    executedPlayerId: executedPlayerId
+  });
+  
+  // 타이머 시작
+  startTimer(roomId, () => {
+    // 타이머 종료 후 승리 조건 확인
+    checkWinCondition(roomId);
     
-    const nightMessage: ChatMessage = {
-      id: `msg-${Date.now() + 1}`,
-      senderId: 'system',
-      senderName: '시스템',
-      content: '밤이 되었습니다. 의사가 시민을 살리고 있습니다.',
-      timestamp: Date.now() + 1,
-      isSystemMessage: true,
-    };
-    
-    room.messages.push(nightMessage);
-    
-    io.to(roomId).emit('nightStarted', { gameState: room });
-    startTimer(roomId);
-  }
+    // 게임이 끝나지 않았다면 밤 단계로 전환
+    if (room && !room.winner) {
+      // 밤 단계로 전환
+      room.phase = 'night';
+      room.nightPhase = 'doctor'; // 의사부터 시작
+      room.day++;
+      room.timer = 10; // 의사 10초로 변경
+      
+      const nightMessage: ChatMessage = {
+        id: `msg-${Date.now()}`,
+        senderId: 'system',
+        senderName: '시스템',
+        content: '밤이 되었습니다. 의사가 시민을 살리고 있습니다.',
+        timestamp: Date.now(),
+        isSystemMessage: true,
+      };
+      
+      room.messages.push(nightMessage);
+      
+      io.to(roomId).emit('nightStarted', { gameState: room });
+      startTimer(roomId);
+    }
+  });
 }
 
 // 승리 조건 확인
@@ -1067,6 +1209,38 @@ function getRoleText(role: PlayerRole): string {
       return '관전자';
     default:
       return '알 수 없음';
+  }
+}
+
+// 밤 단계 시작 함수
+function startNightPhase(roomId: string) {
+  const room = rooms[roomId];
+  if (!room) return;
+  
+  // 승리 조건 확인
+  checkWinCondition(roomId);
+  
+  // 게임이 끝나지 않았다면 밤 단계로 전환
+  if (!room.winner) {
+    // 밤 단계로 전환
+    room.phase = 'night';
+    room.nightPhase = 'doctor'; // 의사부터 시작
+    room.day++;
+    room.timer = 10; // 의사 10초로 변경
+    
+    const nightMessage: ChatMessage = {
+      id: `msg-${Date.now()}`,
+      senderId: 'system',
+      senderName: '시스템',
+      content: '밤이 되었습니다. 의사가 시민을 살리고 있습니다.',
+      timestamp: Date.now(),
+      isSystemMessage: true,
+    };
+    
+    room.messages.push(nightMessage);
+    
+    io.to(roomId).emit('nightStarted', { gameState: room });
+    startTimer(roomId);
   }
 }
 

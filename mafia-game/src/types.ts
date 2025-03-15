@@ -1,5 +1,5 @@
 export type PlayerRole = 'citizen' | 'mafia' | 'doctor' | 'police' | 'spectator';
-export type GamePhase = 'waiting' | 'night' | 'day-discussion' | 'day-voting' | 'game-over';
+export type GamePhase = 'waiting' | 'night' | 'day-discussion' | 'day-voting' | 'vote-result' | 'game-over';
 export type AIDifficulty = 'easy' | 'medium' | 'hard';
 
 export interface UserState {

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
   Container, 
@@ -18,6 +18,7 @@ import GameTimer from '../components/GameTimer';
 import Chat from '../components/Chat';
 import { useUser } from '../contexts/UserContext';
 import { useGame } from '../contexts/GameContext';
+import { GameState } from '../types';
 
 const GamePage: React.FC = () => {
   const navigate = useNavigate();
@@ -35,6 +36,30 @@ const GamePage: React.FC = () => {
   } = useGame();
   
   const [selectedPlayerId, setSelectedPlayerId] = useState<string | null>(null);
+  const [voteResults, setVoteResults] = useState<Record<string, number>>({});
+  const [executedPlayerId, setExecutedPlayerId] = useState<string | null>(null);
+  
+  // 소켓 이벤트 리스너 추가 - 컴포넌트 최상위 레벨에 위치
+  useEffect(() => {
+    if (!gameState) return;
+    
+    // 투표 결과 이벤트 리스너
+    const handleVoteResult = (data: { gameState: GameState, voteCounts: Record<string, number>, executedPlayerId: string | null }) => {
+      setVoteResults(data.voteCounts);
+      setExecutedPlayerId(data.executedPlayerId);
+    };
+    
+    // 소켓 이벤트 리스너 등록
+    const socket = (window as any).socket;
+    if (socket) {
+      socket.on('vote_result', handleVoteResult);
+      
+      // 컴포넌트 언마운트 시 이벤트 리스너 제거
+      return () => {
+        socket.off('vote_result', handleVoteResult);
+      };
+    }
+  }, [gameState]);
   
   if (!gameState) {
     console.error('GamePage: gameState가 없습니다.');
@@ -77,6 +102,7 @@ const GamePage: React.FC = () => {
   const isNight = gameState.phase === 'night';
   const isDayDiscussion = gameState.phase === 'day-discussion';
   const isDayVoting = gameState.phase === 'day-voting';
+  const isVoteResult = gameState.phase === 'vote-result';
   const isGameOver = gameState.phase === 'game-over';
   
   const canChat = !isNight || (isNight && player.role === 'mafia');
@@ -134,11 +160,38 @@ const GamePage: React.FC = () => {
   const getPhaseDescription = (): string => {
     if (isNight) {
       if (gameState.nightPhase === 'doctor') {
-        return '밤이 되었습니다. 의사가 시민을 살리고 있습니다.';
+        const doctorPlayers = gameState.players.filter(p => p.isAlive && p.role === 'doctor');
+        const doctorActed = gameState.nightActions.doctorSave !== null;
+        
+        if (doctorPlayers.length === 0) {
+          return '밤이 되었습니다. 의사가 없어 다음 단계로 넘어갑니다.';
+        } else if (!doctorActed) {
+          return '밤이 되었습니다. 의사가 시민을 살리고 있습니다. 의사는 행동을 완료해주세요.';
+        } else {
+          return '밤이 되었습니다. 의사가 시민을 살렸습니다.';
+        }
       } else if (gameState.nightPhase === 'police') {
-        return '경찰이 시민을 조사하고 있습니다.';
+        const policePlayers = gameState.players.filter(p => p.isAlive && p.role === 'police');
+        const policeActed = gameState.nightActions.policeCheck.targetId !== null;
+        
+        if (policePlayers.length === 0) {
+          return '경찰이 없어 다음 단계로 넘어갑니다.';
+        } else if (!policeActed) {
+          return '경찰이 시민을 조사하고 있습니다. 경찰은 행동을 완료해주세요.';
+        } else {
+          return '경찰이 시민을 조사했습니다.';
+        }
       } else if (gameState.nightPhase === 'mafia') {
-        return '마피아가 선량한 시민을 죽이려 하고 있습니다.';
+        const mafiaPlayers = gameState.players.filter(p => p.isAlive && p.role === 'mafia');
+        const mafiaActed = gameState.nightActions.mafiaKill !== null;
+        
+        if (mafiaPlayers.length === 0) {
+          return '마피아가 없어 다음 단계로 넘어갑니다.';
+        } else if (!mafiaActed) {
+          return '마피아가 선량한 시민을 죽이려 하고 있습니다. 마피아는 행동을 완료해주세요.';
+        } else {
+          return '마피아가 시민을 죽였습니다.';
+        }
       }
       
       if (player.role === 'mafia') return '죽일 사람을 선택하세요.';
@@ -147,7 +200,18 @@ const GamePage: React.FC = () => {
       return '밤이 되었습니다. 마피아, 의사, 경찰이 행동할 시간입니다.';
     }
     if (isDayDiscussion) return '낮이 되었습니다. 마피아를 찾기 위해 토론하세요.';
-    if (isDayVoting) return '투표 시간입니다. 처형할 사람을 선택하세요.';
+    if (isDayVoting) {
+      const alivePlayers = gameState.players.filter(p => p.isAlive);
+      const votedPlayers = Object.keys(gameState.votingResults);
+      const notVotedCount = alivePlayers.length - votedPlayers.length;
+      
+      if (notVotedCount > 0) {
+        return `투표 시간입니다. 처형할 사람을 선택하세요. 아직 ${notVotedCount}명이 투표하지 않았습니다.`;
+      } else {
+        return '모든 플레이어가 투표를 완료했습니다. 결과를 기다려주세요.';
+      }
+    }
+    if (isVoteResult) return '투표 결과가 발표되었습니다.';
     if (isGameOver) {
       if (gameState.winner === 'citizens') return '시민팀이 승리했습니다!';
       if (gameState.winner === 'mafia') return '마피아팀이 승리했습니다!';
@@ -244,6 +308,75 @@ const GamePage: React.FC = () => {
     return false;
   };
   
+  // 현재 플레이어가 행동했는지 확인
+  const hasPlayerActed = (): boolean => {
+    if (isDayVoting) {
+      // 투표 단계에서는 투표 결과에 플레이어 ID가 있는지 확인
+      return Object.keys(gameState.votingResults).includes(player.id);
+    }
+    
+    if (isNight) {
+      // 밤 단계에서는 역할에 따라 행동 여부 확인
+      if (gameState.nightPhase === 'doctor' && player.role === 'doctor') {
+        return gameState.nightActions.doctorSave !== null;
+      }
+      if (gameState.nightPhase === 'police' && player.role === 'police') {
+        return gameState.nightActions.policeCheck.targetId !== null;
+      }
+      if (gameState.nightPhase === 'mafia' && player.role === 'mafia') {
+        return gameState.nightActions.mafiaKill !== null;
+      }
+    }
+    
+    return false;
+  };
+  
+  // 투표 결과 표시 컴포넌트
+  const renderVoteResults = () => {
+    if (!isVoteResult || Object.keys(voteResults).length === 0) return null;
+    
+    // 득표수 내림차순으로 정렬
+    const sortedResults = Object.entries(voteResults)
+      .sort(([, a], [, b]) => b - a)
+      .map(([playerId, votes]) => {
+        const player = getPlayerById(playerId);
+        if (!player) return null;
+        
+        const isExecuted = playerId === executedPlayerId;
+        
+        return (
+          <div 
+            key={playerId} 
+            style={{ 
+              padding: '10px', 
+              margin: '5px 0', 
+              backgroundColor: isExecuted ? '#ffcccc' : '#f0f0f0',
+              borderRadius: '5px',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              border: isExecuted ? '2px solid #e74c3c' : 'none'
+            }}
+          >
+            <div>
+              <strong>{player.name}</strong>
+              {isExecuted && <span style={{ color: '#e74c3c', marginLeft: '10px' }}>처형됨</span>}
+            </div>
+            <div>
+              <Badge variant="primary">{votes}표</Badge>
+            </div>
+          </div>
+        );
+      });
+    
+    return (
+      <Card style={{ marginTop: '20px' }}>
+        <Subtitle>투표 결과</Subtitle>
+        {sortedResults}
+      </Card>
+    );
+  };
+  
   return (
     <Container>
       <Card>
@@ -253,6 +386,19 @@ const GamePage: React.FC = () => {
         <Text style={{ textAlign: 'center', fontSize: '18px', marginBottom: '20px' }}>
           {getPhaseDescription()}
         </Text>
+        
+        {/* 플레이어 행동 상태 표시 */}
+        {(isDayVoting || isNight) && canPlayerActNow() && !hasPlayerActed() && (
+          <Text style={{ textAlign: 'center', color: '#e74c3c', fontWeight: 'bold', marginBottom: '10px' }}>
+            아직 행동을 완료하지 않았습니다. 빨리 행동을 완료해주세요!
+          </Text>
+        )}
+        
+        {(isDayVoting || isNight) && hasPlayerActed() && (
+          <Text style={{ textAlign: 'center', color: '#2ecc71', fontWeight: 'bold', marginBottom: '10px' }}>
+            행동을 완료했습니다. 다른 플레이어를 기다리고 있습니다.
+          </Text>
+        )}
         
         {aiPlayersCount > 0 && (
           <Text style={{ textAlign: 'center', marginBottom: '10px' }}>
@@ -266,6 +412,9 @@ const GamePage: React.FC = () => {
           </Text>
         )}
         
+        {/* 투표 결과 표시 */}
+        {isVoteResult && renderVoteResults()}
+        
         <Grid style={{ gridTemplateColumns: '1fr 2fr' }}>
           <Card>
             <Subtitle>내 정보</Subtitle>
@@ -274,7 +423,7 @@ const GamePage: React.FC = () => {
               description={getRoleDescription(player.role)} 
             />
             
-            {canPlayerActNow() && (
+            {canPlayerActNow() && !hasPlayerActed() && (
               <>
                 <Text style={{ marginTop: '20px' }}>
                   {isNight ? '행동할 대상을 선택하세요:' : '투표할 대상을 선택하세요:'}
@@ -287,6 +436,12 @@ const GamePage: React.FC = () => {
                   {getActionButtonText()}
                 </Button>
               </>
+            )}
+            
+            {canPlayerActNow() && hasPlayerActed() && (
+              <Text style={{ marginTop: '20px', color: '#2ecc71' }}>
+                행동을 완료했습니다. 다른 플레이어를 기다리고 있습니다.
+              </Text>
             )}
             
             {isGameOver && (
