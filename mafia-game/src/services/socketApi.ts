@@ -54,9 +54,9 @@ export const socketApi = {
     });
   },
 
-  vote: (socket: any, targetId: string): Promise<{ success: boolean }> => {
+  vote: (socket: any, targetId: string): Promise<{ success: boolean, message?: string }> => {
     return new Promise((resolve) => {
-      socket.emit('vote', { targetId }, (response: { success: boolean }) => {
+      socket.emit('vote', { targetId }, (response: { success: boolean, message?: string }) => {
         resolve(response);
       });
     });
@@ -66,10 +66,10 @@ export const socketApi = {
     socket: any, 
     action: 'kill' | 'save' | 'check', 
     targetId: string
-  ): Promise<{ success: boolean, result?: boolean }> => {
+  ): Promise<{ success: boolean, result?: boolean, message?: string }> => {
     return new Promise((resolve) => {
       socket.emit('night_action', { action, targetId }, 
-        (response: { success: boolean, result?: boolean }) => {
+        (response: { success: boolean, result?: boolean, message?: string }) => {
           resolve(response);
         }
       );

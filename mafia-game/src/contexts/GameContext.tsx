@@ -17,8 +17,8 @@ interface GameContextType {
   joinRoom: (roomId: string) => void;
   leaveRoom: () => void;
   startGame: () => void;
-  vote: (targetId: string) => void;
-  performNightAction: (action: 'kill' | 'save' | 'check', targetId: string) => Promise<{ success: boolean, result?: boolean } | undefined>;
+  vote: (targetId: string) => Promise<{ success: boolean, message?: string } | undefined>;
+  performNightAction: (action: 'kill' | 'save' | 'check', targetId: string) => Promise<{ success: boolean, result?: boolean, message?: string } | undefined>;
   sendMessage: (content: string) => void;
   getPlayerById: (playerId: string) => Player | undefined;
   getCurrentPlayer: () => Player | undefined;
@@ -193,17 +193,19 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   };
 
-  const vote = async (targetId: string) => {
-    if (!socket || !isConnected || !gameState) return;
+  const vote = async (targetId: string): Promise<{ success: boolean, message?: string } | undefined> => {
+    if (!socket || !isConnected || !gameState) return undefined;
 
     try {
-      await socketApi.vote(socket, targetId);
+      const response = await socketApi.vote(socket, targetId);
+      return response;
     } catch (error) {
       console.error('투표 오류:', error);
+      return { success: false, message: '투표 중 오류가 발생했습니다.' };
     }
   };
 
-  const performNightAction = async (action: 'kill' | 'save' | 'check', targetId: string): Promise<{ success: boolean, result?: boolean } | undefined> => {
+  const performNightAction = async (action: 'kill' | 'save' | 'check', targetId: string): Promise<{ success: boolean, result?: boolean, message?: string } | undefined> => {
     if (!socket || !isConnected || !gameState) return undefined;
 
     try {

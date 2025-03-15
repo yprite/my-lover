@@ -205,9 +205,29 @@ const GamePage: React.FC = () => {
     if (isNight) {
       // 밤 행동
       if (player.role === 'mafia') {
-        performNightAction('kill', selectedPlayerId);
+        performNightAction('kill', selectedPlayerId)
+          .then((result) => {
+            if (result && result.success) {
+              const targetPlayer = getPlayerById(selectedPlayerId);
+              if (targetPlayer) {
+                alert(`${targetPlayer.name}님을 죽이기로 선택했습니다.`);
+              }
+            } else if (result) {
+              alert('행동 실패: ' + (result.message || '알 수 없는 오류가 발생했습니다.'));
+            }
+          });
       } else if (player.role === 'doctor') {
-        performNightAction('save', selectedPlayerId);
+        performNightAction('save', selectedPlayerId)
+          .then((result) => {
+            if (result && result.success) {
+              const targetPlayer = getPlayerById(selectedPlayerId);
+              if (targetPlayer) {
+                alert(`${targetPlayer.name}님을 살리기로 선택했습니다.`);
+              }
+            } else if (result) {
+              alert('행동 실패: ' + (result.message || '알 수 없는 오류가 발생했습니다.'));
+            }
+          });
       } else if (player.role === 'police') {
         performNightAction('check', selectedPlayerId)
           .then((result) => {
@@ -222,12 +242,28 @@ const GamePage: React.FC = () => {
               if (targetPlayer) {
                 alert(`${targetPlayer.name}님은 ${result.result ? '마피아입니다!' : '마피아가 아닙니다.'}`);
               }
+            } else if (result) {
+              alert('행동 실패: ' + (result.message || '알 수 없는 오류가 발생했습니다.'));
             }
           });
       }
     } else if (isDayVoting) {
       // 투표
-      vote(selectedPlayerId);
+      vote(selectedPlayerId)
+        .then((result) => {
+          if (result && result.success) {
+            const targetPlayer = getPlayerById(selectedPlayerId);
+            if (targetPlayer) {
+              alert(`${targetPlayer.name}님에게 투표했습니다.`);
+            }
+          } else if (result) {
+            alert('투표 실패: ' + (result.message || '알 수 없는 오류가 발생했습니다.'));
+          }
+        })
+        .catch((error) => {
+          console.error('투표 오류:', error);
+          alert('투표 중 오류가 발생했습니다.');
+        });
     }
     
     setSelectedPlayerId(null);
