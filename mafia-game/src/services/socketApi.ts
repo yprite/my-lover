@@ -149,7 +149,11 @@ export const setupSocketListeners = (
   });
 
   // 게임 시작
-  socket.on('game_started', () => {
+  socket.on('game_started', (data: { gameState: GameState }) => {
+    console.log('game_started 이벤트 수신:', data);
+    if (callbacks.onGameStateUpdate && data.gameState) {
+      callbacks.onGameStateUpdate(data.gameState);
+    }
     if (callbacks.onGameStarted) {
       callbacks.onGameStarted();
     }

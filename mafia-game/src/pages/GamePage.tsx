@@ -37,13 +37,39 @@ const GamePage: React.FC = () => {
   const [selectedPlayerId, setSelectedPlayerId] = useState<string | null>(null);
   
   if (!gameState) {
+    console.error('GamePage: gameState가 없습니다.');
     navigate('/lobby');
     return null;
   }
   
+  console.log('GamePage: 게임 상태', gameState);
+  
   const currentPlayer = getCurrentPlayer();
+  console.log('GamePage: 현재 플레이어', currentPlayer);
   
   if (!currentPlayer) {
+    console.error('GamePage: currentPlayer가 없습니다. 유저 ID:', user.id);
+    console.log('GamePage: 모든 플레이어', gameState.players);
+    
+    // 플레이어를 찾을 수 없는 경우 직접 찾아보기
+    const playerInRoom = gameState.players.find(p => p.id === user.id);
+    console.log('GamePage: 직접 찾은 플레이어', playerInRoom);
+    
+    if (playerInRoom) {
+      // 플레이어를 찾았으면 계속 진행
+      console.log('GamePage: 플레이어를 직접 찾았습니다.');
+    } else {
+      // 플레이어를 찾지 못했으면 로비로 이동
+      navigate('/lobby');
+      return null;
+    }
+  }
+  
+  // 이 시점에서 currentPlayer가 없을 수 있으므로 playerInRoom을 사용
+  const player = currentPlayer || gameState.players.find(p => p.id === user.id);
+  
+  if (!player) {
+    console.error('GamePage: 플레이어를 찾을 수 없습니다.');
     navigate('/lobby');
     return null;
   }
@@ -53,7 +79,7 @@ const GamePage: React.FC = () => {
   const isDayVoting = gameState.phase === 'day-voting';
   const isGameOver = gameState.phase === 'game-over';
   
-  const canChat = !isNight || (isNight && currentPlayer.role === 'mafia');
+  const canChat = !isNight || (isNight && player.role === 'mafia');
   
   const handlePlayerSelect = (playerId: string) => {
     if (canPerformAction() && playerId !== user.id) {
@@ -66,11 +92,11 @@ const GamePage: React.FC = () => {
     
     if (isNight) {
       // 밤 행동
-      if (currentPlayer.role === 'mafia') {
+      if (player.role === 'mafia') {
         performNightAction('kill', selectedPlayerId);
-      } else if (currentPlayer.role === 'doctor') {
+      } else if (player.role === 'doctor') {
         performNightAction('save', selectedPlayerId);
-      } else if (currentPlayer.role === 'police') {
+      } else if (player.role === 'police') {
         performNightAction('check', selectedPlayerId);
       }
     } else if (isDayVoting) {
@@ -83,9 +109,9 @@ const GamePage: React.FC = () => {
   
   const getActionButtonText = (): string => {
     if (isNight) {
-      if (currentPlayer.role === 'mafia') return '죽이기';
-      if (currentPlayer.role === 'doctor') return '살리기';
-      if (currentPlayer.role === 'police') return '조사하기';
+      if (player.role === 'mafia') return '죽이기';
+      if (player.role === 'doctor') return '살리기';
+      if (player.role === 'police') return '조사하기';
     }
     if (isDayVoting) return '투표하기';
     return '행동하기';
@@ -93,9 +119,9 @@ const GamePage: React.FC = () => {
   
   const getPhaseDescription = (): string => {
     if (isNight) {
-      if (currentPlayer.role === 'mafia') return '죽일 사람을 선택하세요.';
-      if (currentPlayer.role === 'doctor') return '살릴 사람을 선택하세요.';
-      if (currentPlayer.role === 'police') return '조사할 사람을 선택하세요.';
+      if (player.role === 'mafia') return '죽일 사람을 선택하세요.';
+      if (player.role === 'doctor') return '살릴 사람을 선택하세요.';
+      if (player.role === 'police') return '조사할 사람을 선택하세요.';
       return '밤이 되었습니다. 마피아, 의사, 경찰이 행동할 시간입니다.';
     }
     if (isDayDiscussion) return '낮이 되었습니다. 마피아를 찾기 위해 토론하세요.';
@@ -108,7 +134,7 @@ const GamePage: React.FC = () => {
   };
   
   const getPoliceCheckResult = (): string => {
-    if (currentPlayer.role === 'police' && gameState.nightActions.policeCheck.targetId) {
+    if (player.role === 'police' && gameState.nightActions.policeCheck.targetId) {
       const targetId = gameState.nightActions.policeCheck.targetId;
       const targetPlayer = getPlayerById(targetId);
       const isMafia = gameState.nightActions.policeCheck.result;
@@ -138,7 +164,7 @@ const GamePage: React.FC = () => {
           </Text>
         )}
         
-        {currentPlayer.role === 'police' && getPoliceCheckResult() && (
+        {player.role === 'police' && getPoliceCheckResult() && (
           <Text style={{ textAlign: 'center', color: '#e74c3c', fontWeight: 'bold', marginBottom: '20px' }}>
             {getPoliceCheckResult()}
           </Text>
@@ -148,8 +174,8 @@ const GamePage: React.FC = () => {
           <Card>
             <Subtitle>내 정보</Subtitle>
             <RoleCard 
-              role={currentPlayer.role} 
-              description={getRoleDescription(currentPlayer.role)} 
+              role={player.role} 
+              description={getRoleDescription(player.role)} 
             />
             
             {canPerformAction() && (
@@ -193,7 +219,7 @@ const GamePage: React.FC = () => {
                       showRole={
                         isGameOver || 
                         player.id === user.id || 
-                        (currentPlayer.role === 'mafia' && player.role === 'mafia')
+                        (player.role === 'mafia' && player.role === 'mafia')
                       }
                       isSelectable={
                         canPerformAction() && 
@@ -220,7 +246,7 @@ const GamePage: React.FC = () => {
                       isCurrentPlayer={false}
                       showRole={
                         isGameOver || 
-                        (currentPlayer.role === 'mafia' && player.role === 'mafia')
+                        (player.role === 'mafia' && player.role === 'mafia')
                       }
                       isSelectable={
                         canPerformAction() && 

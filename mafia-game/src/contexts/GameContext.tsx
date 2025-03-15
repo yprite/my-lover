@@ -71,6 +71,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     const unsubscribe = setupSocketListeners(socket, {
       onGameStateUpdate: (newGameState: GameState) => {
+        console.log('게임 상태 업데이트:', newGameState);
         setGameState(newGameState);
       },
       onRoomJoined: (roomId: string) => {
@@ -90,6 +91,8 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       },
       onGameStarted: () => {
         console.log('게임이 시작되었습니다');
+        console.log('현재 게임 상태:', gameState);
+        // 게임 시작 시 화면 전환은 RoomPage 컴포넌트에서 gameState 변경을 감지하여 처리
       },
       onGameEnded: (winner: 'citizens' | 'mafia') => {
         console.log(`게임이 종료되었습니다. 승자: ${winner}`);
@@ -159,11 +162,18 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   };
 
-  const startGame = async () => {
+  const startGame = () => {
     if (!socket || !isConnected || !gameState) return;
 
     try {
-      await socketApi.startGame(socket);
+      socketApi.startGame(socket)
+        .then(response => {
+          if (response.success) {
+            console.log('게임 시작 성공');
+          } else {
+            console.error('게임 시작 실패:', response);
+          }
+        });
     } catch (error) {
       console.error('게임 시작 오류:', error);
     }
@@ -200,18 +210,34 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const addAIPlayer = (difficulty: 'easy' | 'medium' | 'hard' = 'medium') => {
-    if (socket) {
-      socket.emit('addAIPlayer', { difficulty });
-      console.log(`AI 플레이어 추가 요청 (난이도: ${difficulty})`);
-    }
-  };
-
-  const removeAIPlayer = async (aiId: string) => {
     if (!socket || !isConnected || !gameState) return;
 
     try {
-      await socketApi.removeAIPlayer(socket, aiId);
-      console.log(`AI 플레이어 ${aiId} 제거 요청 전송됨`);
+      socketApi.addAIPlayer(socket, difficulty)
+        .then(response => {
+          if (response.success) {
+            console.log(`AI 플레이어 추가 성공 (난이도: ${difficulty})`);
+          } else {
+            console.error('AI 플레이어 추가 실패:', response);
+          }
+        });
+    } catch (error) {
+      console.error('AI 플레이어 추가 오류:', error);
+    }
+  };
+
+  const removeAIPlayer = (aiId: string) => {
+    if (!socket || !isConnected || !gameState) return;
+
+    try {
+      socketApi.removeAIPlayer(socket, aiId)
+        .then(response => {
+          if (response.success) {
+            console.log(`AI 플레이어 제거 성공: ${aiId}`);
+          } else {
+            console.error('AI 플레이어 제거 실패:', response);
+          }
+        });
     } catch (error) {
       console.error('AI 플레이어 제거 오류:', error);
     }
@@ -222,7 +248,13 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const getCurrentPlayer = (): Player | undefined => {
-    return getPlayerById(user.id);
+    const player = getPlayerById(user.id);
+    console.log('getCurrentPlayer 호출:', { 
+      userId: user.id, 
+      player, 
+      allPlayers: gameState?.players 
+    });
+    return player;
   };
 
   const isPlayerAlive = (playerId: string): boolean => {

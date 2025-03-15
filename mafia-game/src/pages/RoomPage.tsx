@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
   Container, 
@@ -33,13 +33,39 @@ const RoomPage: React.FC = () => {
   
   const [aiDifficulty, setAiDifficulty] = useState<AIDifficulty>('medium');
   
+  // 게임 상태 변경 감지하여 게임 화면으로 전환
+  useEffect(() => {
+    try {
+      if (gameState && gameState.phase !== 'waiting') {
+        console.log('게임 상태 변경 감지: 게임 화면으로 전환', gameState.phase);
+        navigate('/game');
+      }
+    } catch (error) {
+      console.error('게임 화면 전환 중 오류 발생:', error);
+    }
+  }, [gameState, navigate]);
+  
   if (!gameState) {
     navigate('/lobby');
     return null;
   }
   
+  // 호스트 상태 확인 - 직접 gameState에서 확인
   const currentPlayer = getCurrentPlayer();
-  const isHost = currentPlayer?.isHost || false;
+  const playerInRoom = gameState.players.find(p => p.id === user.id);
+  
+  // 호스트 상태를 명시적으로 확인
+  let isHost = false;
+  if (playerInRoom && playerInRoom.isHost) {
+    isHost = true;
+  }
+  
+  console.log('현재 플레이어:', currentPlayer);
+  console.log('방에서 찾은 플레이어:', playerInRoom);
+  console.log('호스트 여부:', isHost);
+  console.log('게임 상태:', gameState);
+  console.log('유저 정보:', user);
+  console.log('모든 플레이어:', gameState.players);
   
   const handleLeaveRoom = () => {
     leaveRoom();
@@ -48,7 +74,9 @@ const RoomPage: React.FC = () => {
   
   const handleStartGame = () => {
     startGame();
-    navigate('/game');
+    // 호스트가 게임 시작 버튼을 클릭하면 서버에 요청만 보내고, 
+    // 실제 화면 전환은 서버로부터 game_started 이벤트를 받았을 때 처리합니다.
+    // navigate('/game'); // 이 부분을 제거
   };
   
   const copyRoomCode = () => {
