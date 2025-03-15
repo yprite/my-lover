@@ -163,7 +163,7 @@ export const setupSocketListeners = (
   });
   
   // AI 플레이어 추가됨
-  socket.on('aiPlayerAdded', (data: { gameState: GameState, aiPlayer: Player }) => {
+  socket.on('ai_player_added', (data: { gameState: GameState, aiPlayer: Player }) => {
     if (callbacks.onGameStateUpdate) {
       callbacks.onGameStateUpdate(data.gameState);
     }
@@ -173,7 +173,7 @@ export const setupSocketListeners = (
   });
   
   // AI 플레이어 제거됨
-  socket.on('aiPlayerRemoved', (data: { gameState: GameState, aiId: string }) => {
+  socket.on('ai_player_removed', (data: { gameState: GameState, aiId: string }) => {
     if (callbacks.onGameStateUpdate) {
       callbacks.onGameStateUpdate(data.gameState);
     }
@@ -197,8 +197,8 @@ export const setupSocketListeners = (
     socket.off('new_message');
     socket.off('game_started');
     socket.off('game_ended');
-    socket.off('aiPlayerAdded');
-    socket.off('aiPlayerRemoved');
+    socket.off('ai_player_added');
+    socket.off('ai_player_removed');
     socket.off('error');
   };
 }; 

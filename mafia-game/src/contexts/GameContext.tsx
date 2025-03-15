@@ -115,7 +115,17 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     try {
       const response = await socketApi.createRoom(socket, roomName);
-      updateCurrentRoom(response.roomId);
+      console.log('방 생성 성공:', response);
+      
+      // 방 생성 후 해당 방에 참가
+      const joinResponse = await socketApi.joinRoom(socket, response.roomId);
+      if (joinResponse.success && joinResponse.gameState) {
+        setGameState(joinResponse.gameState);
+        updateCurrentRoom(response.roomId);
+        console.log('방 참가 성공:', joinResponse);
+      } else {
+        console.error('방 참가 실패:', joinResponse);
+      }
     } catch (error) {
       console.error('방 생성 오류:', error);
     }

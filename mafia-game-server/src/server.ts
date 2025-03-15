@@ -152,8 +152,13 @@ io.on('connection', (socket) => {
   });
 
   // 게임 시작
-  socket.on('startGame', ({ roomId }: { roomId: string }) => {
-    if (rooms[roomId]) {
+  socket.on('start_game', ({}, callback) => {
+    // 플레이어가 속한 방 찾기
+    const roomId = Object.keys(rooms).find(roomId => 
+      rooms[roomId].players.some(player => player.id === socket.id && player.isHost)
+    );
+    
+    if (roomId && rooms[roomId]) {
       const room = rooms[roomId];
       
       // 역할 할당 로직
@@ -201,110 +206,206 @@ io.on('connection', (socket) => {
       room.messages = [...room.messages, systemMessage];
       room.timer = 60; // 60초 타이머
       
-      io.to(roomId).emit('gameStarted', { gameState: room });
+      io.to(roomId).emit('game_started', { gameState: room });
+      callback({ success: true });
       console.log(`방 ${roomId}에서 게임 시작됨`);
       
       // 타이머 시작
       startTimer(roomId);
+    } else {
+      callback({ success: false, message: '방을 찾을 수 없거나 호스트가 아닙니다.' });
     }
   });
 
   // 메시지 전송
-  socket.on('sendMessage', ({ roomId, message }: { roomId: string, message: ChatMessage }) => {
-    if (rooms[roomId]) {
-      rooms[roomId].messages.push(message);
-      io.to(roomId).emit('newMessage', { message, gameState: rooms[roomId] });
+  socket.on('send_message', ({ content }, callback) => {
+    // 플레이어가 속한 방 찾기
+    const roomId = Object.keys(rooms).find(roomId => 
+      rooms[roomId].players.some(player => player.id === socket.id)
+    );
+    
+    if (roomId && rooms[roomId]) {
+      const room = rooms[roomId];
+      const player = room.players.find(p => p.id === socket.id);
+      
+      if (player) {
+        const message: ChatMessage = {
+          id: `msg-${Date.now()}-${socket.id}`,
+          senderId: socket.id,
+          senderName: player.name,
+          content,
+          timestamp: Date.now(),
+          isSystemMessage: false,
+        };
+        
+        room.messages.push(message);
+        io.to(roomId).emit('new_message', { message, gameState: room });
+        callback({ success: true });
+      } else {
+        callback({ success: false, message: '플레이어를 찾을 수 없습니다.' });
+      }
+    } else {
+      callback({ success: false, message: '방을 찾을 수 없습니다.' });
     }
   });
 
   // 투표
-  socket.on('vote', ({ roomId, voterId, targetId }: { roomId: string, voterId: string, targetId: string }) => {
-    if (rooms[roomId] && rooms[roomId].phase === 'day-voting') {
-      rooms[roomId].votingResults[voterId] = targetId;
-      io.to(roomId).emit('voteUpdated', { gameState: rooms[roomId] });
+  socket.on('vote', ({ targetId }, callback) => {
+    // 플레이어가 속한 방 찾기
+    const roomId = Object.keys(rooms).find(roomId => 
+      rooms[roomId].players.some(player => player.id === socket.id)
+    );
+    
+    if (roomId && rooms[roomId]) {
+      const room = rooms[roomId];
       
-      // 모든 살아있는 플레이어가 투표했는지 확인
-      const alivePlayers = rooms[roomId].players.filter(p => p.isAlive);
-      const votedPlayers = Object.keys(rooms[roomId].votingResults);
-      
-      if (alivePlayers.every(p => votedPlayers.includes(p.id))) {
-        // 투표 결과 처리
-        processVotingResults(roomId);
+      if (room.phase === 'day-voting') {
+        const voterId = socket.id;
+        room.votingResults[voterId] = targetId;
+        
+        io.to(roomId).emit('vote_updated', { gameState: room });
+        callback({ success: true });
+        
+        // 모든 살아있는 플레이어가 투표했는지 확인
+        const alivePlayers = room.players.filter(p => p.isAlive);
+        const votedPlayers = Object.keys(room.votingResults);
+        
+        if (alivePlayers.every(p => votedPlayers.includes(p.id))) {
+          // 투표 결과 처리
+          processVotingResults(roomId);
+        }
+      } else {
+        callback({ success: false, message: '현재 투표 단계가 아닙니다.' });
       }
+    } else {
+      callback({ success: false, message: '방을 찾을 수 없습니다.' });
     }
   });
 
   // 밤 행동
-  socket.on('nightAction', ({ roomId, action, playerId, targetId }: { roomId: string, action: 'kill' | 'save' | 'check', playerId: string, targetId: string }) => {
-    if (rooms[roomId] && rooms[roomId].phase === 'night') {
+  socket.on('night_action', ({ action, targetId }, callback) => {
+    // 플레이어가 속한 방 찾기
+    const roomId = Object.keys(rooms).find(roomId => 
+      rooms[roomId].players.some(player => player.id === socket.id)
+    );
+    
+    if (roomId && rooms[roomId]) {
       const room = rooms[roomId];
-      const player = room.players.find(p => p.id === playerId);
       
-      if (player && player.isAlive) {
-        if (action === 'kill' && player.role === 'mafia') {
-          room.nightActions.mafiaKill = targetId;
-        } else if (action === 'save' && player.role === 'doctor') {
-          room.nightActions.doctorSave = targetId;
-        } else if (action === 'check' && player.role === 'police') {
-          const targetPlayer = room.players.find(p => p.id === targetId);
-          room.nightActions.policeCheck = {
-            targetId,
-            result: targetPlayer?.role === 'mafia',
-          };
+      if (room.phase === 'night') {
+        const playerId = socket.id;
+        const player = room.players.find(p => p.id === playerId);
+        
+        if (player && player.isAlive) {
+          let success = false;
+          let result = null;
+          
+          if (action === 'kill' && player.role === 'mafia') {
+            room.nightActions.mafiaKill = targetId;
+            success = true;
+          } else if (action === 'save' && player.role === 'doctor') {
+            room.nightActions.doctorSave = targetId;
+            success = true;
+          } else if (action === 'check' && player.role === 'police') {
+            const targetPlayer = room.players.find(p => p.id === targetId);
+            result = targetPlayer?.role === 'mafia';
+            room.nightActions.policeCheck = {
+              targetId,
+              result,
+            };
+            success = true;
+          }
+          
+          if (success) {
+            io.to(roomId).emit('night_action_performed', { gameState: room });
+            callback({ success: true, result });
+            
+            // 모든 밤 행동이 완료되었는지 확인
+            checkNightActionsCompleted(roomId);
+          } else {
+            callback({ success: false, message: '유효하지 않은 행동입니다.' });
+          }
+        } else {
+          callback({ success: false, message: '플레이어를 찾을 수 없거나 죽은 상태입니다.' });
         }
-        
-        io.to(roomId).emit('nightActionPerformed', { gameState: room });
-        
-        // 모든 밤 행동이 완료되었는지 확인
-        checkNightActionsCompleted(roomId);
+      } else {
+        callback({ success: false, message: '현재 밤 단계가 아닙니다.' });
       }
+    } else {
+      callback({ success: false, message: '방을 찾을 수 없습니다.' });
     }
   });
 
   // AI 플레이어 추가
-  socket.on('addAIPlayer', ({ roomId, difficulty = 'medium' }: { roomId: string, difficulty?: AIDifficulty }) => {
-    if (rooms[roomId] && rooms[roomId].phase === 'waiting') {
+  socket.on('add_ai_player', ({ difficulty = 'medium' }, callback) => {
+    // 플레이어가 속한 방 찾기
+    const roomId = Object.keys(rooms).find(roomId => 
+      rooms[roomId].players.some(player => player.id === socket.id && player.isHost)
+    );
+    
+    if (roomId && rooms[roomId]) {
       const room = rooms[roomId];
       
-      // AI 번호 계산 (기존 AI 플레이어 수 + 1)
-      const aiNumber = room.players.filter(p => p.isAI).length + 1;
-      
-      // AI 플레이어 생성
-      const aiPlayer = createAIPlayer(aiNumber, difficulty, false);
-      
-      // 방에 AI 플레이어 추가
-      room.players.push(aiPlayer);
-      
-      // 클라이언트에 알림
-      io.to(roomId).emit('aiPlayerAdded', { 
-        gameState: room,
-        aiPlayer
-      });
-      
-      console.log(`AI 플레이어 ${aiPlayer.name}(난이도: ${difficulty})가 방 ${roomId}에 추가됨`);
+      if (room.phase === 'waiting') {
+        // AI 번호 계산 (기존 AI 플레이어 수 + 1)
+        const aiNumber = room.players.filter(p => p.isAI).length + 1;
+        
+        // AI 플레이어 생성
+        const aiPlayer = createAIPlayer(aiNumber, difficulty, false);
+        
+        // 방에 AI 플레이어 추가
+        room.players.push(aiPlayer);
+        
+        // 클라이언트에 알림
+        io.to(roomId).emit('ai_player_added', { 
+          gameState: room,
+          aiPlayer
+        });
+        
+        callback({ success: true, player: aiPlayer });
+        console.log(`AI 플레이어 ${aiPlayer.name}(난이도: ${difficulty})가 방 ${roomId}에 추가됨`);
+      } else {
+        callback({ success: false, message: '대기 중인 방에서만 AI 플레이어를 추가할 수 있습니다.' });
+      }
+    } else {
+      callback({ success: false, message: '방을 찾을 수 없거나 호스트가 아닙니다.' });
     }
   });
 
   // AI 플레이어 제거
-  socket.on('removeAIPlayer', ({ roomId, aiId }: { roomId: string, aiId: string }) => {
-    if (rooms[roomId] && rooms[roomId].phase === 'waiting') {
+  socket.on('remove_ai_player', ({ aiId }, callback) => {
+    // 플레이어가 속한 방 찾기
+    const roomId = Object.keys(rooms).find(roomId => 
+      rooms[roomId].players.some(player => player.id === socket.id && player.isHost)
+    );
+    
+    if (roomId && rooms[roomId]) {
       const room = rooms[roomId];
       
-      // 제거할 AI 플레이어 찾기
-      const aiPlayer = room.players.find(p => p.id === aiId && p.isAI);
-      
-      if (aiPlayer) {
-        // 방에서 AI 플레이어 제거
-        room.players = room.players.filter(p => p.id !== aiId);
+      if (room.phase === 'waiting') {
+        // 제거할 AI 플레이어 찾기
+        const aiPlayer = room.players.find(p => p.id === aiId && p.isAI);
         
-        // 클라이언트에 알림
-        io.to(roomId).emit('aiPlayerRemoved', { 
-          gameState: room,
-          aiId
-        });
-        
-        console.log(`AI 플레이어 ${aiPlayer.name}가 방 ${roomId}에서 제거됨`);
+        if (aiPlayer) {
+          // 방에서 AI 플레이어 제거
+          room.players = room.players.filter(p => p.id !== aiId);
+          
+          // 클라이언트에 알림
+          io.to(roomId).emit('ai_player_removed', { 
+            gameState: room,
+            aiId
+          });
+          
+          callback({ success: true });
+          console.log(`AI 플레이어 ${aiPlayer.name}가 방 ${roomId}에서 제거됨`);
+        } else {
+          callback({ success: false, message: 'AI 플레이어를 찾을 수 없습니다.' });
+        }
+      } else {
+        callback({ success: false, message: '대기 중인 방에서만 AI 플레이어를 제거할 수 있습니다.' });
       }
+    } else {
+      callback({ success: false, message: '방을 찾을 수 없거나 호스트가 아닙니다.' });
     }
   });
 
