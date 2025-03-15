@@ -118,7 +118,8 @@ const GamePage: React.FC = () => {
     canPerformAction, 
     performNightAction, 
     vote, 
-    sendMessage 
+    sendMessage,
+    setGameState
   } = useGame();
   
   const [selectedPlayerId, setSelectedPlayerId] = useState<string | null>(null);
@@ -135,14 +136,21 @@ const GamePage: React.FC = () => {
       setExecutedPlayerId(data.executedPlayerId);
     };
     
+    // 투표 업데이트 이벤트 리스너
+    const handleVoteUpdated = (data: { gameState: GameState }) => {
+      console.log('투표 업데이트:', data.gameState.votingResults);
+    };
+    
     // 소켓 이벤트 리스너 등록
     const socket = (window as any).socket;
     if (socket) {
       socket.on('vote_result', handleVoteResult);
+      socket.on('vote_updated', handleVoteUpdated);
       
       // 컴포넌트 언마운트 시 이벤트 리스너 제거
       return () => {
         socket.off('vote_result', handleVoteResult);
+        socket.off('vote_updated', handleVoteUpdated);
       };
     }
   }, [gameState]);
@@ -249,14 +257,19 @@ const GamePage: React.FC = () => {
       }
     } else if (isDayVoting) {
       // 투표
+      console.log('투표 전 상태:', gameState.votingResults);
       vote(selectedPlayerId)
         .then((result) => {
           if (result && result.success) {
+            console.log('투표 성공:', result);
+            console.log('투표 후 상태:', gameState.votingResults);
+            
             const targetPlayer = getPlayerById(selectedPlayerId);
             if (targetPlayer) {
               alert(`${targetPlayer.name}님에게 투표했습니다.`);
             }
           } else if (result) {
+            console.error('투표 실패:', result);
             alert('투표 실패: ' + (result.message || '알 수 없는 오류가 발생했습니다.'));
           }
         })

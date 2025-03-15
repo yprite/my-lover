@@ -123,6 +123,7 @@ export const setupSocketListeners = (
     onDayStarted?: (gameState: GameState) => void;
     onVotingStarted?: (gameState: GameState) => void;
     onNightStarted?: (gameState: GameState) => void;
+    onVoteUpdated?: (gameState: GameState) => void;
     onError?: (error: string) => void;
   }
 ) => {
@@ -255,6 +256,17 @@ export const setupSocketListeners = (
     }
   });
 
+  // 투표 업데이트
+  socket.on('vote_updated', (data: { gameState: GameState }) => {
+    console.log('투표 업데이트됨:', data.gameState);
+    if (callbacks.onGameStateUpdate) {
+      callbacks.onGameStateUpdate(data.gameState);
+    }
+    if (callbacks.onVoteUpdated) {
+      callbacks.onVoteUpdated(data.gameState);
+    }
+  });
+
   // 오류 처리
   socket.on('error', (data: { message: string }) => {
     if (callbacks.onError) {
@@ -278,6 +290,7 @@ export const setupSocketListeners = (
     socket.off('dayStarted');
     socket.off('votingStarted');
     socket.off('nightStarted');
+    socket.off('vote_updated');
     socket.off('error');
   };
 }; 

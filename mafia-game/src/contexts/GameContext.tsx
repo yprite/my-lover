@@ -117,6 +117,10 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       onAIPlayerRemoved: (aiId: string) => {
         console.log(`AI 플레이어가 제거되었습니다: ${aiId}`);
       },
+      onVoteUpdated: (newGameState: GameState) => {
+        console.log('투표 업데이트:', newGameState.votingResults);
+        setGameState(newGameState);
+      },
       onError: (error: string) => {
         console.error('소켓 오류:', error);
       }
