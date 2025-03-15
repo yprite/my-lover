@@ -97,7 +97,21 @@ const GamePage: React.FC = () => {
       } else if (player.role === 'doctor') {
         performNightAction('save', selectedPlayerId);
       } else if (player.role === 'police') {
-        performNightAction('check', selectedPlayerId);
+        performNightAction('check', selectedPlayerId)
+          .then((result) => {
+            if (result && result.success && result.result !== undefined) {
+              // 경찰 조사 결과를 로컬 스토리지에 저장
+              const policeResults = JSON.parse(localStorage.getItem('policeResults') || '{}');
+              policeResults[selectedPlayerId] = result.result;
+              localStorage.setItem('policeResults', JSON.stringify(policeResults));
+              
+              // 결과 즉시 표시
+              const targetPlayer = getPlayerById(selectedPlayerId);
+              if (targetPlayer) {
+                alert(`${targetPlayer.name}님은 ${result.result ? '마피아입니다!' : '마피아가 아닙니다.'}`);
+              }
+            }
+          });
       }
     } else if (isDayVoting) {
       // 투표
@@ -142,13 +156,33 @@ const GamePage: React.FC = () => {
   };
   
   const getPoliceCheckResult = (): string => {
-    if (player.role === 'police' && gameState.nightActions.policeCheck.targetId) {
-      const targetId = gameState.nightActions.policeCheck.targetId;
-      const targetPlayer = getPlayerById(targetId);
-      const isMafia = gameState.nightActions.policeCheck.result;
+    if (player.role === 'police') {
+      // 현재 밤에 조사한 결과 확인
+      if (gameState.nightActions.policeCheck.targetId) {
+        const targetId = gameState.nightActions.policeCheck.targetId;
+        const targetPlayer = getPlayerById(targetId);
+        const isMafia = gameState.nightActions.policeCheck.result;
+        
+        if (targetPlayer && isMafia !== null) {
+          return `${targetPlayer.name}님은 ${isMafia ? '마피아입니다!' : '마피아가 아닙니다.'}`;
+        }
+      }
       
-      if (targetPlayer) {
-        return `${targetPlayer.name}님은 ${isMafia ? '마피아입니다!' : '마피아가 아닙니다.'}`;
+      // 이전에 조사한 결과 확인 (로컬 스토리지에서)
+      try {
+        const policeResults = JSON.parse(localStorage.getItem('policeResults') || '{}');
+        const lastCheckedPlayerId = Object.keys(policeResults).pop();
+        
+        if (lastCheckedPlayerId) {
+          const targetPlayer = getPlayerById(lastCheckedPlayerId);
+          const isMafia = policeResults[lastCheckedPlayerId];
+          
+          if (targetPlayer) {
+            return `${targetPlayer.name}님은 ${isMafia ? '마피아입니다!' : '마피아가 아닙니다.'}`;
+          }
+        }
+      } catch (error) {
+        console.error('경찰 조사 결과 로드 오류:', error);
       }
     }
     return '';
@@ -163,10 +197,22 @@ const GamePage: React.FC = () => {
     }
     
     // 자신이 경찰이고 해당 플레이어를 조사한 경우에만 마피아 여부 표시
-    if (player.role === 'police' && 
-        gameState.nightActions.policeCheck.targetId === playerId && 
-        gameState.nightActions.policeCheck.result === true) {
-      return true;
+    if (player.role === 'police') {
+      // 현재 밤에 조사한 결과 확인
+      if (gameState.nightActions.policeCheck.targetId === playerId && 
+          gameState.nightActions.policeCheck.result === true) {
+        return true;
+      }
+      
+      // 이전에 조사한 결과 확인 (로컬 스토리지에서)
+      try {
+        const policeResults = JSON.parse(localStorage.getItem('policeResults') || '{}');
+        if (policeResults[playerId] === true) {
+          return true;
+        }
+      } catch (error) {
+        console.error('경찰 조사 결과 로드 오류:', error);
+      }
     }
     
     return false;

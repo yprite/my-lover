@@ -18,7 +18,7 @@ interface GameContextType {
   leaveRoom: () => void;
   startGame: () => void;
   vote: (targetId: string) => void;
-  performNightAction: (action: 'kill' | 'save' | 'check', targetId: string) => void;
+  performNightAction: (action: 'kill' | 'save' | 'check', targetId: string) => Promise<{ success: boolean, result?: boolean } | undefined>;
   sendMessage: (content: string) => void;
   getPlayerById: (playerId: string) => Player | undefined;
   getCurrentPlayer: () => Player | undefined;
@@ -203,13 +203,15 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   };
 
-  const performNightAction = async (action: 'kill' | 'save' | 'check', targetId: string) => {
-    if (!socket || !isConnected || !gameState) return;
+  const performNightAction = async (action: 'kill' | 'save' | 'check', targetId: string): Promise<{ success: boolean, result?: boolean } | undefined> => {
+    if (!socket || !isConnected || !gameState) return undefined;
 
     try {
-      await socketApi.performNightAction(socket, action, targetId);
+      const response = await socketApi.performNightAction(socket, action, targetId);
+      return response;
     } catch (error) {
       console.error('밤 행동 오류:', error);
+      return undefined;
     }
   };
 
