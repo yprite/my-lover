@@ -33,6 +33,7 @@ const initialGameState: GameState = {
   roomId: '',
   players: [],
   phase: 'waiting',
+  nightPhase: null,
   day: 0,
   winner: null,
   votingResults: {},
@@ -96,6 +97,19 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       },
       onGameEnded: (winner: 'citizens' | 'mafia') => {
         console.log(`게임이 종료되었습니다. 승자: ${winner}`);
+      },
+      onTimerUpdated: (timer: number) => {
+        console.log(`타이머 업데이트: ${timer}`);
+        if (gameState) {
+          setGameState({
+            ...gameState,
+            timer: timer
+          });
+        }
+      },
+      onNightPhaseChanged: (newGameState: GameState, nightPhase: 'doctor' | 'police' | 'mafia') => {
+        console.log(`밤 단계 변경: ${nightPhase}`);
+        setGameState(newGameState);
       },
       onAIPlayerAdded: (aiPlayer: Player) => {
         console.log(`AI 플레이어가 추가되었습니다: ${aiPlayer.name} (난이도: ${aiPlayer.aiDifficulty})`);

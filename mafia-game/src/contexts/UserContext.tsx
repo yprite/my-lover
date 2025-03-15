@@ -16,6 +16,7 @@ const initialUserState: UserState = {
   id: '',
   name: '',
   currentRoom: null,
+  isLoggedIn: false
 };
 
 const UserContext = createContext<UserContextType | undefined>(undefined);
@@ -58,11 +59,8 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const login = async (username: string): Promise<boolean> => {
-    if (!socket || !isConnected) {
-      console.error('소켓이 연결되지 않았습니다.');
-      return false;
-    }
-
+    if (!socket || !isConnected) return false;
+    
     try {
       const response = await socketApi.login(socket, username);
       console.log('로그인 성공:', response);
@@ -70,6 +68,7 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         id: response.userId,
         name: response.username,
         currentRoom: null,
+        isLoggedIn: true
       });
       return true;
     } catch (error) {

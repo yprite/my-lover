@@ -8,6 +8,7 @@ interface PlayerCardProps {
   isCurrentPlayer?: boolean;
   isSelectable?: boolean;
   isSelected?: boolean;
+  isMafia?: boolean;
   onClick?: () => void;
 }
 
@@ -64,6 +65,7 @@ const PlayerCard: React.FC<PlayerCardProps> = ({
   isCurrentPlayer = false,
   isSelectable = false,
   isSelected = false,
+  isMafia = false,
   onClick,
 }) => {
   const { name, role, isAlive, isHost, isAI, aiDifficulty } = player;
@@ -81,17 +83,18 @@ const PlayerCard: React.FC<PlayerCardProps> = ({
       onClick={handleClick}
       style={{ cursor: isSelectable && isAlive ? 'pointer' : 'default' }}
     >
-      <Avatar bgColor={getRoleColor(showRole ? role : 'spectator')}>
+      <Avatar bgColor={getRoleColor(showRole || isMafia ? role : 'spectator')}>
         {name.charAt(0).toUpperCase()}
       </Avatar>
       <div>
         <Text style={{ fontWeight: 'bold', marginBottom: '5px' }}>
-          {name} {isCurrentPlayer && '(나)'}
+          {name} {isCurrentPlayer && '(나)'} {isMafia && '🔍'}
         </Text>
         <FlexRow>
           {isHost && <Badge variant="warning">방장</Badge>}
           {!isAlive && <Badge variant="danger">사망</Badge>}
           {showRole && <Badge variant="primary">{getRoleText(role)}</Badge>}
+          {isMafia && !showRole && <Badge variant="danger">마피아</Badge>}
           {isAI && <Badge variant="secondary">AI {aiDifficulty && `(${getAIDifficultyText(aiDifficulty)})`}</Badge>}
         </FlexRow>
       </div>

@@ -117,6 +117,12 @@ export const setupSocketListeners = (
     onGameEnded?: (winner: 'citizens' | 'mafia') => void;
     onAIPlayerAdded?: (aiPlayer: Player) => void;
     onAIPlayerRemoved?: (aiId: string) => void;
+    onTimerUpdated?: (timer: number) => void;
+    onNightActionPerformed?: (gameState: GameState) => void;
+    onNightPhaseChanged?: (gameState: GameState, nightPhase: 'doctor' | 'police' | 'mafia') => void;
+    onDayStarted?: (gameState: GameState) => void;
+    onVotingStarted?: (gameState: GameState) => void;
+    onNightStarted?: (gameState: GameState) => void;
     onError?: (error: string) => void;
   }
 ) => {
@@ -186,6 +192,69 @@ export const setupSocketListeners = (
     }
   });
 
+  // 타이머 업데이트
+  socket.on('timer_updated', (data: { timer: number }) => {
+    console.log('타이머 업데이트:', data.timer);
+    if (callbacks.onTimerUpdated) {
+      callbacks.onTimerUpdated(data.timer);
+    }
+  });
+  
+  // 밤 단계 변경
+  socket.on('night_phase_changed', (data: { gameState: GameState, nightPhase: 'doctor' | 'police' | 'mafia' }) => {
+    console.log('밤 단계 변경:', data.nightPhase);
+    if (callbacks.onGameStateUpdate) {
+      callbacks.onGameStateUpdate(data.gameState);
+    }
+    if (callbacks.onNightPhaseChanged) {
+      callbacks.onNightPhaseChanged(data.gameState, data.nightPhase);
+    }
+  });
+  
+  // 밤 행동 수행됨
+  socket.on('night_action_performed', (data: { gameState: GameState }) => {
+    console.log('밤 행동 수행됨:', data.gameState);
+    if (callbacks.onGameStateUpdate) {
+      callbacks.onGameStateUpdate(data.gameState);
+    }
+    if (callbacks.onNightActionPerformed) {
+      callbacks.onNightActionPerformed(data.gameState);
+    }
+  });
+
+  // 낮 시작
+  socket.on('dayStarted', (data: { gameState: GameState }) => {
+    console.log('낮 시작됨:', data.gameState);
+    if (callbacks.onGameStateUpdate) {
+      callbacks.onGameStateUpdate(data.gameState);
+    }
+    if (callbacks.onDayStarted) {
+      callbacks.onDayStarted(data.gameState);
+    }
+  });
+  
+  // 투표 시작
+  socket.on('votingStarted', (data: { gameState: GameState }) => {
+    console.log('투표 시작됨:', data.gameState);
+    if (callbacks.onGameStateUpdate) {
+      callbacks.onGameStateUpdate(data.gameState);
+    }
+    if (callbacks.onVotingStarted) {
+      callbacks.onVotingStarted(data.gameState);
+    }
+  });
+  
+  // 밤 시작
+  socket.on('nightStarted', (data: { gameState: GameState }) => {
+    console.log('밤 시작됨:', data.gameState);
+    if (callbacks.onGameStateUpdate) {
+      callbacks.onGameStateUpdate(data.gameState);
+    }
+    if (callbacks.onNightStarted) {
+      callbacks.onNightStarted(data.gameState);
+    }
+  });
+
   // 오류 처리
   socket.on('error', (data: { message: string }) => {
     if (callbacks.onError) {
@@ -203,6 +272,12 @@ export const setupSocketListeners = (
     socket.off('game_ended');
     socket.off('ai_player_added');
     socket.off('ai_player_removed');
+    socket.off('timer_updated');
+    socket.off('night_phase_changed');
+    socket.off('night_action_performed');
+    socket.off('dayStarted');
+    socket.off('votingStarted');
+    socket.off('nightStarted');
     socket.off('error');
   };
 }; 

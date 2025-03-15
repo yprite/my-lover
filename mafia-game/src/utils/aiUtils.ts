@@ -434,6 +434,7 @@ export const createAIPlayer = (
     role: 'spectator', // 초기 역할은 관전자, 게임 시작 시 변경됨
     isAlive: true,
     isHost: false,
+    isReady: true, // AI 플레이어는 항상 준비 완료 상태
     isAI: true,
     aiDifficulty: difficulty
   };

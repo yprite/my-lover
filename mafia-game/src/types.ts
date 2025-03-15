@@ -1,19 +1,13 @@
-// src/types.ts
-export type PlayerRole = 
-  | 'citizen' 
-  | 'mafia' 
-  | 'doctor' 
-  | 'police' 
-  | 'spectator';
-
-export type GamePhase = 
-  | 'waiting' 
-  | 'night' 
-  | 'day-discussion' 
-  | 'day-voting' 
-  | 'game-over';
-
+export type PlayerRole = 'citizen' | 'mafia' | 'doctor' | 'police' | 'spectator';
+export type GamePhase = 'waiting' | 'night' | 'day-discussion' | 'day-voting' | 'game-over';
 export type AIDifficulty = 'easy' | 'medium' | 'hard';
+
+export interface UserState {
+  id: string;
+  name: string;
+  currentRoom: string | null;
+  isLoggedIn: boolean;
+}
 
 export interface Player {
   id: string;
@@ -21,9 +15,18 @@ export interface Player {
   role: PlayerRole;
   isAlive: boolean;
   isHost: boolean;
-  isReady?: boolean;
-  isAI?: boolean;
+  isReady: boolean;
+  isAI: boolean;
   aiDifficulty?: AIDifficulty;
+}
+
+export interface ChatMessage {
+  id: string;
+  senderId: string;
+  senderName: string;
+  content: string;
+  timestamp: number;
+  isSystemMessage: boolean;
 }
 
 export interface GameState {
@@ -33,7 +36,7 @@ export interface GameState {
   nightPhase: 'doctor' | 'police' | 'mafia' | null;
   day: number;
   winner: 'citizens' | 'mafia' | null;
-  votingResults: Record<string, string>; // key: voterId, value: votedId
+  votingResults: Record<string, string>;
   nightActions: {
     mafiaKill: string | null;
     doctorSave: string | null;
@@ -44,15 +47,6 @@ export interface GameState {
   };
   messages: ChatMessage[];
   timer: number | null;
-}
-
-export interface ChatMessage {
-  id: string;
-  senderId: string;
-  senderName: string;
-  content: string;
-  timestamp: number;
-  isSystemMessage: boolean;
 }
 
 export interface RoomInfo {

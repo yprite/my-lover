@@ -20,6 +20,7 @@ interface Room {
   id: string;
   players: Player[];
   phase: 'waiting' | 'night' | 'day-discussion' | 'day-voting' | 'game-over';
+  nightPhase: 'doctor' | 'police' | 'mafia' | null;
   day: number;
   winner: 'citizens' | 'mafia' | null;
   votingResults: Record<string, string>;
@@ -33,6 +34,7 @@ interface Room {
   };
   messages: ChatMessage[];
   timer: number | null;
+  executedPlayer: Player | null; // 처형된 플레이어 정보 저장
 }
 
 const rooms: Record<string, Room> = {};
@@ -68,6 +70,8 @@ io.on('connection', (socket) => {
       },
       messages: [],
       timer: null,
+      nightPhase: null,
+      executedPlayer: null,
     };
     
     callback({ roomId });
@@ -195,16 +199,17 @@ io.on('connection', (socket) => {
         id: `msg-${Date.now()}`,
         senderId: 'system',
         senderName: '시스템',
-        content: '게임이 시작되었습니다. 밤이 되었습니다.',
+        content: '게임이 시작되었습니다. 낮이 되었습니다. 마피아를 찾기 위해 토론하세요.',
         timestamp: Date.now(),
         isSystemMessage: true,
       };
       
       room.players = players;
-      room.phase = 'night';
+      room.phase = 'day-discussion';
       room.day = 1;
       room.messages = [...room.messages, systemMessage];
-      room.timer = 60; // 60초 타이머
+      room.timer = 60; // 60초 타이머 (낮 토론 시간)
+      room.nightPhase = null; // 밤 단계 초기화
       
       io.to(roomId).emit('game_started', { gameState: room });
       callback({ success: true });
@@ -351,7 +356,7 @@ io.on('connection', (socket) => {
         const aiNumber = room.players.filter(p => p.isAI).length + 1;
         
         // AI 플레이어 생성
-        const aiPlayer = createAIPlayer(aiNumber, difficulty, false);
+        const aiPlayer = createAIPlayer(aiNumber, difficulty);
         
         // 방에 AI 플레이어 추가
         room.players.push(aiPlayer);
@@ -438,7 +443,7 @@ function startTimer(roomId: string) {
   const timerId = setInterval(() => {
     if (room.timer !== null && room.timer > 0) {
       room.timer--;
-      io.to(roomId).emit('timerUpdated', { timer: room.timer });
+      io.to(roomId).emit('timer_updated', { timer: room.timer });
       
       // AI 플레이어 행동 처리
       handleAIActions(roomId);
@@ -447,12 +452,58 @@ function startTimer(roomId: string) {
         clearInterval(timerId);
         
         // 타이머가 끝났을 때 다음 단계로 진행
-        if (room.phase === 'night') {
-          processNightActions(roomId);
-        } else if (room.phase === 'day-discussion') {
+        if (room.phase === 'day-discussion') {
           startVotingPhase(roomId);
         } else if (room.phase === 'day-voting') {
           processVotingResults(roomId);
+        } else if (room.phase === 'night') {
+          // 밤 단계 진행
+          if (room.nightPhase === 'doctor') {
+            // 의사 단계 종료, 경찰 단계 시작
+            room.nightPhase = 'police';
+            room.timer = 10; // 경찰 10초로 변경
+            
+            const message: ChatMessage = {
+              id: `msg-${Date.now()}`,
+              senderId: 'system',
+              senderName: '시스템',
+              content: '경찰이 시민을 조사하고 있습니다.',
+              timestamp: Date.now(),
+              isSystemMessage: true,
+            };
+            room.messages.push(message);
+            
+            io.to(roomId).emit('night_phase_changed', { 
+              gameState: room,
+              nightPhase: 'police'
+            });
+            
+            startTimer(roomId);
+          } else if (room.nightPhase === 'police') {
+            // 경찰 단계 종료, 마피아 단계 시작
+            room.nightPhase = 'mafia';
+            room.timer = 10; // 마피아 10초로 변경
+            
+            const message: ChatMessage = {
+              id: `msg-${Date.now()}`,
+              senderId: 'system',
+              senderName: '시스템',
+              content: '마피아가 선량한 시민을 죽이려 하고 있습니다.',
+              timestamp: Date.now(),
+              isSystemMessage: true,
+            };
+            room.messages.push(message);
+            
+            io.to(roomId).emit('night_phase_changed', { 
+              gameState: room,
+              nightPhase: 'mafia'
+            });
+            
+            startTimer(roomId);
+          } else if (room.nightPhase === 'mafia') {
+            // 마피아 단계 종료, 밤 행동 처리
+            processNightActions(roomId);
+          }
         }
       }
     } else {
@@ -509,7 +560,8 @@ function handleAIChatMessages(room: Room, aiPlayers: Player[]) {
         votingResults: room.votingResults,
         nightActions: room.nightActions,
         messages: room.messages,
-        timer: room.timer
+        timer: room.timer,
+        nightPhase: room.nightPhase
       };
       
       const content = generateAIChatMessage(aiPlayer, gameState, room.phase);
@@ -525,7 +577,7 @@ function handleAIChatMessages(room: Room, aiPlayers: Player[]) {
         };
         
         room.messages.push(message);
-        io.to(room.id).emit('newMessage', { message, gameState: room });
+        io.to(room.id).emit('new_message', { message, gameState: room });
       }
     }
   });
@@ -550,7 +602,8 @@ function handleAIVoting(room: Room, aiPlayers: Player[]) {
     votingResults: room.votingResults,
     nightActions: room.nightActions,
     messages: room.messages,
-    timer: room.timer
+    timer: room.timer,
+    nightPhase: room.nightPhase
   };
   
   // 각 AI 플레이어마다 일정 확률로 투표 진행
@@ -567,7 +620,7 @@ function handleAIVoting(room: Room, aiPlayers: Player[]) {
       
       if (targetId) {
         room.votingResults[aiPlayer.id] = targetId;
-        io.to(room.id).emit('voteUpdated', { gameState: room });
+        io.to(room.id).emit('vote_updated', { gameState: room });
         
         console.log(`AI 플레이어 ${aiPlayer.name}가 ${targetId}에게 투표함`);
         
@@ -586,100 +639,136 @@ function handleAIVoting(room: Room, aiPlayers: Player[]) {
 
 // AI 밤 행동 처리
 function handleAINightActions(room: Room, aiPlayers: Player[]) {
-  // 역할별로 AI 플레이어 분류
-  const aiMafias = aiPlayers.filter(p => p.role === 'mafia');
-  const aiDoctors = aiPlayers.filter(p => p.role === 'doctor');
-  const aiPolice = aiPlayers.filter(p => p.role === 'police');
-  
-  // Room을 GameState로 변환
-  const gameState: GameState = {
-    roomId: room.id,
-    players: room.players,
-    phase: room.phase,
-    day: room.day,
-    winner: room.winner,
-    votingResults: room.votingResults,
-    nightActions: room.nightActions,
-    messages: room.messages,
-    timer: room.timer
-  };
-  
-  // 마피아 AI 행동
-  if (aiMafias.length > 0 && room.nightActions.mafiaKill === null) {
-    // 난이도에 따라 행동 확률 조정 (초당)
-    const actionChance = aiMafias[0].aiDifficulty === 'easy' ? 0.03 : 
-                        aiMafias[0].aiDifficulty === 'medium' ? 0.05 : 0.08;
+  // 현재 밤 단계에 따라 AI 행동 처리
+  if (room.nightPhase === 'doctor') {
+    // 의사 AI 행동
+    const aiDoctors = aiPlayers.filter(p => p.role === 'doctor');
     
-    // 타이머가 10초 이하로 남았다면 무조건 행동
-    const shouldAct = room.timer !== null && room.timer <= 10 ? true : Math.random() < actionChance;
-    
-    if (shouldAct) {
-      // 여러 마피아가 있을 경우 랜덤하게 한 명 선택
-      const randomAIMafia = aiMafias[Math.floor(Math.random() * aiMafias.length)];
-      const targetId = selectAINightActionTarget(randomAIMafia, gameState);
+    if (aiDoctors.length > 0 && room.nightActions.doctorSave === null) {
+      // 난이도에 따라 행동 확률 조정 (초당)
+      const actionChance = aiDoctors[0].aiDifficulty === 'easy' ? 0.03 : 
+                          aiDoctors[0].aiDifficulty === 'medium' ? 0.05 : 0.08;
       
-      if (targetId) {
-        room.nightActions.mafiaKill = targetId;
-        io.to(room.id).emit('nightActionPerformed', { gameState: room });
-        
-        console.log(`AI 마피아 ${randomAIMafia.name}가 ${targetId}를 살해 대상으로 선택함`);
-        
-        // 모든 밤 행동이 완료되었는지 확인
-        checkNightActionsCompleted(room.id);
-      }
-    }
-  }
-  
-  // 의사 AI 행동
-  if (aiDoctors.length > 0 && room.nightActions.doctorSave === null) {
-    // 난이도에 따라 행동 확률 조정 (초당)
-    const actionChance = aiDoctors[0].aiDifficulty === 'easy' ? 0.03 : 
-                        aiDoctors[0].aiDifficulty === 'medium' ? 0.05 : 0.08;
-    
-    // 타이머가 10초 이하로 남았다면 무조건 행동
-    const shouldAct = room.timer !== null && room.timer <= 10 ? true : Math.random() < actionChance;
-    
-    if (shouldAct) {
-      const aiDoctor = aiDoctors[0]; // 의사는 보통 한 명
-      const targetId = selectAINightActionTarget(aiDoctor, gameState);
+      // 타이머가 5초 이하로 남았다면 무조건 행동
+      const shouldAct = room.timer !== null && room.timer <= 5 ? true : Math.random() < actionChance;
       
-      if (targetId) {
-        room.nightActions.doctorSave = targetId;
-        io.to(room.id).emit('nightActionPerformed', { gameState: room });
+      if (shouldAct) {
+        const aiDoctor = aiDoctors[0]; // 의사는 보통 한 명
         
-        console.log(`AI 의사 ${aiDoctor.name}가 ${targetId}를 보호 대상으로 선택함`);
-        
-        // 모든 밤 행동이 완료되었는지 확인
-        checkNightActionsCompleted(room.id);
-      }
-    }
-  }
-  
-  // 경찰 AI 행동
-  if (aiPolice.length > 0 && room.nightActions.policeCheck.targetId === null) {
-    // 난이도에 따라 행동 확률 조정 (초당)
-    const actionChance = aiPolice[0].aiDifficulty === 'easy' ? 0.03 : 
-                        aiPolice[0].aiDifficulty === 'medium' ? 0.05 : 0.08;
-    
-    // 타이머가 10초 이하로 남았다면 무조건 행동
-    const shouldAct = room.timer !== null && room.timer <= 10 ? true : Math.random() < actionChance;
-    
-    if (shouldAct) {
-      const aiPoliceOfficer = aiPolice[0]; // 경찰은 보통 한 명
-      const targetId = selectAINightActionTarget(aiPoliceOfficer, gameState);
-      
-      if (targetId) {
-        const targetPlayer = room.players.find(p => p.id === targetId);
-        room.nightActions.policeCheck = {
-          targetId,
-          result: targetPlayer?.role === 'mafia',
+        // Room을 GameState로 변환
+        const gameState: GameState = {
+          roomId: room.id,
+          players: room.players,
+          phase: room.phase,
+          day: room.day,
+          winner: room.winner,
+          votingResults: room.votingResults,
+          nightActions: room.nightActions,
+          messages: room.messages,
+          timer: room.timer,
+          nightPhase: room.nightPhase
         };
-        io.to(room.id).emit('nightActionPerformed', { gameState: room });
         
-        console.log(`AI 경찰 ${aiPoliceOfficer.name}가 ${targetId}를 조사 대상으로 선택함`);
+        const targetId = selectAINightActionTarget(aiDoctor, gameState);
         
-        // 모든 밤 행동이 완료되었는지 확인
-        checkNightActionsCompleted(room.id);
+        if (targetId) {
+          room.nightActions.doctorSave = targetId;
+          io.to(room.id).emit('night_action_performed', { gameState: room });
+          
+          console.log(`AI 의사 ${aiDoctor.name}가 ${targetId}를 보호 대상으로 선택함`);
+          
+          // 의사 행동 완료 확인
+          checkNightActionsCompleted(room.id);
+        }
+      }
+    }
+  } else if (room.nightPhase === 'police') {
+    // 경찰 AI 행동
+    const aiPolice = aiPlayers.filter(p => p.role === 'police');
+    
+    if (aiPolice.length > 0 && room.nightActions.policeCheck.targetId === null) {
+      // 난이도에 따라 행동 확률 조정 (초당)
+      const actionChance = aiPolice[0].aiDifficulty === 'easy' ? 0.03 : 
+                          aiPolice[0].aiDifficulty === 'medium' ? 0.05 : 0.08;
+      
+      // 타이머가 5초 이하로 남았다면 무조건 행동
+      const shouldAct = room.timer !== null && room.timer <= 5 ? true : Math.random() < actionChance;
+      
+      if (shouldAct) {
+        const aiPoliceOfficer = aiPolice[0]; // 경찰은 보통 한 명
+        
+        // Room을 GameState로 변환
+        const gameState: GameState = {
+          roomId: room.id,
+          players: room.players,
+          phase: room.phase,
+          day: room.day,
+          winner: room.winner,
+          votingResults: room.votingResults,
+          nightActions: room.nightActions,
+          messages: room.messages,
+          timer: room.timer,
+          nightPhase: room.nightPhase
+        };
+        
+        const targetId = selectAINightActionTarget(aiPoliceOfficer, gameState);
+        
+        if (targetId) {
+          const targetPlayer = room.players.find(p => p.id === targetId);
+          room.nightActions.policeCheck = {
+            targetId,
+            result: targetPlayer?.role === 'mafia',
+          };
+          io.to(room.id).emit('night_action_performed', { gameState: room });
+          
+          console.log(`AI 경찰 ${aiPoliceOfficer.name}가 ${targetId}를 조사 대상으로 선택함`);
+          
+          // 경찰 행동 완료 확인
+          checkNightActionsCompleted(room.id);
+        }
+      }
+    }
+  } else if (room.nightPhase === 'mafia') {
+    // 마피아 AI 행동
+    const aiMafias = aiPlayers.filter(p => p.role === 'mafia');
+    
+    if (aiMafias.length > 0 && room.nightActions.mafiaKill === null) {
+      // 난이도에 따라 행동 확률 조정 (초당)
+      const actionChance = aiMafias[0].aiDifficulty === 'easy' ? 0.03 : 
+                          aiMafias[0].aiDifficulty === 'medium' ? 0.05 : 0.08;
+      
+      // 타이머가 5초 이하로 남았다면 무조건 행동
+      const shouldAct = room.timer !== null && room.timer <= 5 ? true : Math.random() < actionChance;
+      
+      if (shouldAct) {
+        // 여러 마피아가 있을 경우 랜덤하게 한 명 선택
+        const randomAIMafia = aiMafias[Math.floor(Math.random() * aiMafias.length)];
+        
+        // Room을 GameState로 변환
+        const gameState: GameState = {
+          roomId: room.id,
+          players: room.players,
+          phase: room.phase,
+          day: room.day,
+          winner: room.winner,
+          votingResults: room.votingResults,
+          nightActions: room.nightActions,
+          messages: room.messages,
+          timer: room.timer,
+          nightPhase: room.nightPhase
+        };
+        
+        const targetId = selectAINightActionTarget(randomAIMafia, gameState);
+        
+        if (targetId) {
+          room.nightActions.mafiaKill = targetId;
+          io.to(room.id).emit('night_action_performed', { gameState: room });
+          
+          console.log(`AI 마피아 ${randomAIMafia.name}가 ${targetId}를 살해 대상으로 선택함`);
+          
+          // 마피아 행동 완료 확인
+          checkNightActionsCompleted(room.id);
+        }
       }
     }
   }
@@ -690,19 +779,34 @@ function checkNightActionsCompleted(roomId: string) {
   const room = rooms[roomId];
   if (!room) return;
   
-  const mafiaPlayers = room.players.filter(p => p.isAlive && p.role === 'mafia');
-  const doctorPlayers = room.players.filter(p => p.isAlive && p.role === 'doctor');
-  const policePlayers = room.players.filter(p => p.isAlive && p.role === 'police');
-  
-  const mafiaActed = room.nightActions.mafiaKill !== null || mafiaPlayers.length === 0;
-  const doctorActed = room.nightActions.doctorSave !== null || doctorPlayers.length === 0;
-  const policeActed = room.nightActions.policeCheck.targetId !== null || policePlayers.length === 0;
-  
-  if (mafiaActed && doctorActed && policeActed) {
-    // 모든 밤 행동이 완료되었으면 타이머를 0으로 설정하여 다음 단계로 진행
-    room.timer = 0;
-    io.to(roomId).emit('timerUpdated', { timer: room.timer });
-    processNightActions(roomId);
+  // 현재 밤 단계에 따라 확인
+  if (room.nightPhase === 'doctor') {
+    const doctorPlayers = room.players.filter(p => p.isAlive && p.role === 'doctor');
+    const doctorActed = room.nightActions.doctorSave !== null || doctorPlayers.length === 0;
+    
+    if (doctorActed) {
+      // 의사 행동 완료, 타이머를 0으로 설정하여 다음 단계로 진행
+      room.timer = 0;
+      io.to(roomId).emit('timer_updated', { timer: room.timer });
+    }
+  } else if (room.nightPhase === 'police') {
+    const policePlayers = room.players.filter(p => p.isAlive && p.role === 'police');
+    const policeActed = room.nightActions.policeCheck.targetId !== null || policePlayers.length === 0;
+    
+    if (policeActed) {
+      // 경찰 행동 완료, 타이머를 0으로 설정하여 다음 단계로 진행
+      room.timer = 0;
+      io.to(roomId).emit('timer_updated', { timer: room.timer });
+    }
+  } else if (room.nightPhase === 'mafia') {
+    const mafiaPlayers = room.players.filter(p => p.isAlive && p.role === 'mafia');
+    const mafiaActed = room.nightActions.mafiaKill !== null || mafiaPlayers.length === 0;
+    
+    if (mafiaActed) {
+      // 마피아 행동 완료, 타이머를 0으로 설정하여 다음 단계로 진행
+      room.timer = 0;
+      io.to(roomId).emit('timer_updated', { timer: room.timer });
+    }
   }
 }
 
@@ -717,27 +821,39 @@ function processNightActions(roomId: string) {
   // 시스템 메시지 생성
   const messages: ChatMessage[] = [];
   
-  if (killedPlayerId && killedPlayerId !== savedPlayerId) {
-    // 마피아가 죽인 플레이어가 의사에게 살아나지 않은 경우
+  // 마피아 살인 결과
+  if (killedPlayerId) {
     const killedPlayer = room.players.find(p => p.id === killedPlayerId);
     if (killedPlayer) {
-      killedPlayer.isAlive = false;
-      
-      messages.push({
-        id: `msg-${Date.now()}`,
-        senderId: 'system',
-        senderName: '시스템',
-        content: `${killedPlayer.name}님이 마피아에게 살해당했습니다.`,
-        timestamp: Date.now(),
-        isSystemMessage: true,
-      });
+      if (killedPlayerId === savedPlayerId) {
+        // 의사가 살린 경우
+        messages.push({
+          id: `msg-${Date.now()}`,
+          senderId: 'system',
+          senderName: '시스템',
+          content: '선량한 시민을 의사가 살렸습니다.',
+          timestamp: Date.now(),
+          isSystemMessage: true,
+        });
+      } else {
+        // 마피아가 죽인 경우
+        killedPlayer.isAlive = false;
+        messages.push({
+          id: `msg-${Date.now()}`,
+          senderId: 'system',
+          senderName: '시스템',
+          content: `선량한 시민 ${killedPlayer.name}님이 마피아에 의해 죽었습니다.`,
+          timestamp: Date.now(),
+          isSystemMessage: true,
+        });
+      }
     }
   } else {
     messages.push({
       id: `msg-${Date.now()}`,
       senderId: 'system',
       senderName: '시스템',
-      content: '아무도 죽지 않았습니다.',
+      content: '마피아가 아무도 죽이지 않았습니다.',
       timestamp: Date.now(),
       isSystemMessage: true,
     });
@@ -745,7 +861,8 @@ function processNightActions(roomId: string) {
   
   // 낮 토론 단계로 전환
   room.phase = 'day-discussion';
-  room.timer = 60; // 60초 토론 시간
+  room.nightPhase = null;
+  room.timer = 60; // 60초 토론 시간 (고정)
   room.messages = [...room.messages, ...messages];
   
   // 밤 행동 초기화
@@ -762,16 +879,26 @@ function processNightActions(roomId: string) {
   checkWinCondition(roomId);
   
   if (!room.winner) {
-    messages.push({
+    const dayMessage: ChatMessage = {
       id: `msg-${Date.now() + 1}`,
       senderId: 'system',
       senderName: '시스템',
       content: '낮이 되었습니다. 마피아를 찾기 위해 토론하세요.',
       timestamp: Date.now() + 1,
       isSystemMessage: true,
-    });
+    };
     
+    room.messages.push(dayMessage);
+    
+    // 낮 시작 이벤트 발송
     io.to(roomId).emit('dayStarted', { gameState: room });
+    
+    // 게임 상태 업데이트 이벤트도 함께 발송
+    io.to(roomId).emit('game_state_update', { gameState: room });
+    
+    console.log(`방 ${roomId}에서 낮이 시작됨 (${room.day}일차)`);
+    
+    // 타이머 시작
     startTimer(roomId);
   }
 }
@@ -782,7 +909,7 @@ function startVotingPhase(roomId: string) {
   if (!room) return;
   
   room.phase = 'day-voting';
-  room.timer = 30; // 30초 투표 시간
+  room.timer = 10; // 10초 투표 시간으로 변경
   room.votingResults = {};
   
   const message: ChatMessage = {
@@ -822,7 +949,16 @@ function processVotingResults(roomId: string) {
     }
   }
   
-  // 시스템 메시지 생성
+  // 동점인 경우 처리
+  const tiedPlayers = Object.entries(voteCounts)
+    .filter(([_, votes]) => votes === maxVotes)
+    .map(([playerId]) => playerId);
+  
+  if (tiedPlayers.length > 1) {
+    executedPlayerId = null; // 동점인 경우 처형 없음
+  }
+  
+  // 처형 결과 메시지 표시
   const messages: ChatMessage[] = [];
   
   if (executedPlayerId) {
@@ -858,17 +994,20 @@ function processVotingResults(roomId: string) {
   if (!room.winner) {
     // 밤 단계로 전환
     room.phase = 'night';
+    room.nightPhase = 'doctor'; // 의사부터 시작
     room.day++;
-    room.timer = 30; // 30초 밤 시간
+    room.timer = 10; // 의사 10초로 변경
     
-    messages.push({
+    const nightMessage: ChatMessage = {
       id: `msg-${Date.now() + 1}`,
       senderId: 'system',
       senderName: '시스템',
-      content: '밤이 되었습니다. 마피아, 의사, 경찰은 행동을 선택하세요.',
+      content: '밤이 되었습니다. 의사가 시민을 살리고 있습니다.',
       timestamp: Date.now() + 1,
       isSystemMessage: true,
-    });
+    };
+    
+    room.messages.push(nightMessage);
     
     io.to(roomId).emit('nightStarted', { gameState: room });
     startTimer(roomId);
@@ -934,4 +1073,4 @@ function getRoleText(role: PlayerRole): string {
 const PORT = process.env.PORT || 4000;
 server.listen(PORT, () => {
   console.log(`서버가 포트 ${PORT}에서 실행 중입니다.`);
-}); 
+});

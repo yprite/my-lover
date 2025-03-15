@@ -119,6 +119,14 @@ const GamePage: React.FC = () => {
   
   const getPhaseDescription = (): string => {
     if (isNight) {
+      if (gameState.nightPhase === 'doctor') {
+        return '밤이 되었습니다. 의사가 시민을 살리고 있습니다.';
+      } else if (gameState.nightPhase === 'police') {
+        return '경찰이 시민을 조사하고 있습니다.';
+      } else if (gameState.nightPhase === 'mafia') {
+        return '마피아가 선량한 시민을 죽이려 하고 있습니다.';
+      }
+      
       if (player.role === 'mafia') return '죽일 사람을 선택하세요.';
       if (player.role === 'doctor') return '살릴 사람을 선택하세요.';
       if (player.role === 'police') return '조사할 사람을 선택하세요.';
@@ -139,14 +147,56 @@ const GamePage: React.FC = () => {
       const targetPlayer = getPlayerById(targetId);
       const isMafia = gameState.nightActions.policeCheck.result;
       
-      return `${targetPlayer?.name}님은 ${isMafia ? '마피아' : '마피아가 아닙니다'}.`;
+      if (targetPlayer) {
+        return `${targetPlayer.name}님은 ${isMafia ? '마피아입니다!' : '마피아가 아닙니다.'}`;
+      }
     }
     return '';
+  };
+
+  // 플레이어 카드에 마피아 표시 여부 결정
+  const shouldShowMafiaIndicator = (playerId: string): boolean => {
+    // 자신이 마피아인 경우 다른 마피아를 표시
+    if (player.role === 'mafia') {
+      const targetPlayer = getPlayerById(playerId);
+      return targetPlayer?.role === 'mafia' || false;
+    }
+    
+    // 자신이 경찰이고 해당 플레이어를 조사한 경우에만 마피아 여부 표시
+    if (player.role === 'police' && 
+        gameState.nightActions.policeCheck.targetId === playerId && 
+        gameState.nightActions.policeCheck.result === true) {
+      return true;
+    }
+    
+    return false;
   };
 
   // AI 플레이어 수 계산
   const aiPlayers = gameState.players.filter(p => p.isAI);
   const aiPlayersCount = aiPlayers.length;
+  
+  // 현재 플레이어가 행동할 수 있는지 확인
+  const canPlayerActNow = (): boolean => {
+    // 게임 종료 시 행동 불가
+    if (isGameOver) return false;
+    
+    // 플레이어가 죽었으면 행동 불가
+    if (!player.isAlive) return false;
+    
+    // 투표 단계에서는 모든 살아있는 플레이어가 투표 가능
+    if (isDayVoting) return true;
+    
+    // 밤 단계에서는 현재 밤 단계에 맞는 역할만 행동 가능
+    if (isNight) {
+      if (gameState.nightPhase === 'doctor' && player.role === 'doctor') return true;
+      if (gameState.nightPhase === 'police' && player.role === 'police') return true;
+      if (gameState.nightPhase === 'mafia' && player.role === 'mafia') return true;
+      return false;
+    }
+    
+    return false;
+  };
   
   return (
     <Container>
@@ -178,7 +228,7 @@ const GamePage: React.FC = () => {
               description={getRoleDescription(player.role)} 
             />
             
-            {canPerformAction() && (
+            {canPlayerActNow() && (
               <>
                 <Text style={{ marginTop: '20px' }}>
                   {isNight ? '행동할 대상을 선택하세요:' : '투표할 대상을 선택하세요:'}
@@ -204,61 +254,21 @@ const GamePage: React.FC = () => {
           </Card>
           
           <Card>
-            <Subtitle>플레이어 ({gameState.players.filter(p => p.isAlive).length}명 생존)</Subtitle>
-            
-            {/* 인간 플레이어 섹션 */}
-            {gameState.players.filter(p => !p.isAI).length > 0 && (
-              <>
-                <Text style={{ fontWeight: 'bold', marginTop: '10px', marginBottom: '10px' }}>사람 플레이어</Text>
-                <Grid>
-                  {gameState.players.filter(p => !p.isAI).map(player => (
-                    <PlayerCard
-                      key={player.id}
-                      player={player}
-                      isCurrentPlayer={player.id === user.id}
-                      showRole={
-                        isGameOver || 
-                        player.id === user.id || 
-                        (player.role === 'mafia' && player.role === 'mafia')
-                      }
-                      isSelectable={
-                        canPerformAction() && 
-                        player.id !== user.id && 
-                        player.isAlive
-                      }
-                      isSelected={selectedPlayerId === player.id}
-                      onClick={() => handlePlayerSelect(player.id)}
-                    />
-                  ))}
-                </Grid>
-              </>
-            )}
-            
-            {/* AI 플레이어 섹션 */}
-            {aiPlayersCount > 0 && (
-              <>
-                <Text style={{ fontWeight: 'bold', marginTop: '20px', marginBottom: '10px' }}>AI 플레이어</Text>
-                <Grid>
-                  {gameState.players.filter(p => p.isAI).map(player => (
-                    <PlayerCard
-                      key={player.id}
-                      player={player}
-                      isCurrentPlayer={false}
-                      showRole={
-                        isGameOver || 
-                        (player.role === 'mafia' && player.role === 'mafia')
-                      }
-                      isSelectable={
-                        canPerformAction() && 
-                        player.isAlive
-                      }
-                      isSelected={selectedPlayerId === player.id}
-                      onClick={() => handlePlayerSelect(player.id)}
-                    />
-                  ))}
-                </Grid>
-              </>
-            )}
+            <Subtitle>플레이어 목록</Subtitle>
+            <Grid style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))' }}>
+              {gameState.players.map(p => (
+                <PlayerCard 
+                  key={p.id}
+                  player={p}
+                  isSelected={p.id === selectedPlayerId}
+                  onClick={() => handlePlayerSelect(p.id)}
+                  isCurrentPlayer={p.id === player.id}
+                  isMafia={shouldShowMafiaIndicator(p.id)}
+                  isSelectable={canPerformAction() && p.id !== player.id && p.isAlive}
+                  showRole={isGameOver || p.id === player.id}
+                />
+              ))}
+            </Grid>
           </Card>
         </Grid>
         
