@@ -16,6 +16,7 @@ import PlayerCard from '../components/PlayerCard';
 import RoleCard from '../components/RoleCard';
 import GameTimer from '../components/GameTimer';
 import Chat from '../components/Chat';
+import Toast from '../components/Toast';
 import { useUser } from '../contexts/UserContext';
 import { useGame } from '../contexts/GameContext';
 import { GameState } from '../types';
@@ -125,6 +126,7 @@ const GamePage: React.FC = () => {
   const [selectedPlayerId, setSelectedPlayerId] = useState<string | null>(null);
   const [voteResults, setVoteResults] = useState<Record<string, number>>({});
   const [executedPlayerId, setExecutedPlayerId] = useState<string | null>(null);
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
   
   // 소켓 이벤트 리스너 추가 - 컴포넌트 최상위 레벨에 위치
   useEffect(() => {
@@ -132,13 +134,30 @@ const GamePage: React.FC = () => {
     
     // 투표 결과 이벤트 리스너
     const handleVoteResult = (data: { gameState: GameState, voteCounts: Record<string, number>, executedPlayerId: string | null }) => {
+      console.log('투표 결과 이벤트 수신:', data);
       setVoteResults(data.voteCounts);
       setExecutedPlayerId(data.executedPlayerId);
+      
+      // 게임 상태 업데이트
+      if (data.gameState) {
+        setGameState(data.gameState);
+      }
     };
     
     // 투표 업데이트 이벤트 리스너
     const handleVoteUpdated = (data: { gameState: GameState }) => {
-      console.log('투표 업데이트:', data.gameState.votingResults);
+      console.log('투표 업데이트 이벤트 수신:', data.gameState.votingResults);
+      
+      // 게임 상태 업데이트
+      if (data.gameState) {
+        setGameState(data.gameState);
+      }
+    };
+    
+    // 게임 상태 업데이트 이벤트 리스너 추가
+    const handleGameStateUpdate = (data: GameState) => {
+      console.log('게임 상태 업데이트 이벤트 수신:', data);
+      setGameState(data);
     };
     
     // 소켓 이벤트 리스너 등록
@@ -146,14 +165,16 @@ const GamePage: React.FC = () => {
     if (socket) {
       socket.on('vote_result', handleVoteResult);
       socket.on('vote_updated', handleVoteUpdated);
+      socket.on('game_state_update', handleGameStateUpdate);
       
       // 컴포넌트 언마운트 시 이벤트 리스너 제거
       return () => {
         socket.off('vote_result', handleVoteResult);
         socket.off('vote_updated', handleVoteUpdated);
+        socket.off('game_state_update', handleGameStateUpdate);
       };
     }
-  }, [gameState]);
+  }, [gameState, setGameState]);
   
   if (!gameState) {
     console.error('GamePage: gameState가 없습니다.');
@@ -218,10 +239,10 @@ const GamePage: React.FC = () => {
             if (result && result.success) {
               const targetPlayer = getPlayerById(selectedPlayerId);
               if (targetPlayer) {
-                alert(`${targetPlayer.name}님을 죽이기로 선택했습니다.`);
+                setToast({ message: `${targetPlayer.name}님을 죽이기로 선택했습니다.`, type: 'success' });
               }
             } else if (result) {
-              alert('행동 실패: ' + (result.message || '알 수 없는 오류가 발생했습니다.'));
+              setToast({ message: '행동 실패: ' + (result.message || '알 수 없는 오류가 발생했습니다.'), type: 'error' });
             }
           });
       } else if (player.role === 'doctor') {
@@ -230,10 +251,10 @@ const GamePage: React.FC = () => {
             if (result && result.success) {
               const targetPlayer = getPlayerById(selectedPlayerId);
               if (targetPlayer) {
-                alert(`${targetPlayer.name}님을 살리기로 선택했습니다.`);
+                setToast({ message: `${targetPlayer.name}님을 살리기로 선택했습니다.`, type: 'success' });
               }
             } else if (result) {
-              alert('행동 실패: ' + (result.message || '알 수 없는 오류가 발생했습니다.'));
+              setToast({ message: '행동 실패: ' + (result.message || '알 수 없는 오류가 발생했습니다.'), type: 'error' });
             }
           });
       } else if (player.role === 'police') {
@@ -248,10 +269,10 @@ const GamePage: React.FC = () => {
               // 결과 즉시 표시
               const targetPlayer = getPlayerById(selectedPlayerId);
               if (targetPlayer) {
-                alert(`${targetPlayer.name}님은 ${result.result ? '마피아입니다!' : '마피아가 아닙니다.'}`);
+                setToast({ message: `${targetPlayer.name}님은 ${result.result ? '마피아입니다!' : '마피아가 아닙니다.'}`, type: 'info' });
               }
             } else if (result) {
-              alert('행동 실패: ' + (result.message || '알 수 없는 오류가 발생했습니다.'));
+              setToast({ message: '행동 실패: ' + (result.message || '알 수 없는 오류가 발생했습니다.'), type: 'error' });
             }
           });
       }
@@ -262,20 +283,36 @@ const GamePage: React.FC = () => {
         .then((result) => {
           if (result && result.success) {
             console.log('투표 성공:', result);
-            console.log('투표 후 상태:', gameState.votingResults);
+            
+            // 투표 성공 시 로컬 상태 즉시 업데이트
+            const updatedVotingResults = {
+              ...gameState.votingResults,
+              [player.id]: selectedPlayerId
+            };
+            
+            // 게임 상태 업데이트
+            const updatedGameState = {
+              ...gameState,
+              votingResults: updatedVotingResults
+            };
+            
+            // 상태 업데이트
+            setGameState(updatedGameState);
+            
+            console.log('투표 후 상태 (로컬 업데이트):', updatedVotingResults);
             
             const targetPlayer = getPlayerById(selectedPlayerId);
             if (targetPlayer) {
-              alert(`${targetPlayer.name}님에게 투표했습니다.`);
+              setToast({ message: `${targetPlayer.name}님에게 투표했습니다.`, type: 'success' });
             }
           } else if (result) {
             console.error('투표 실패:', result);
-            alert('투표 실패: ' + (result.message || '알 수 없는 오류가 발생했습니다.'));
+            setToast({ message: '투표 실패: ' + (result.message || '알 수 없는 오류가 발생했습니다.'), type: 'error' });
           }
         })
         .catch((error) => {
           console.error('투표 오류:', error);
-          alert('투표 중 오류가 발생했습니다.');
+          setToast({ message: '투표 중 오류가 발생했습니다.', type: 'error' });
         });
     }
     
@@ -534,6 +571,13 @@ const GamePage: React.FC = () => {
   
   return (
     <Container>
+      {toast && (
+        <Toast
+          message={toast.message}
+          type={toast.type}
+          onClose={() => setToast(null)}
+        />
+      )}
       <Card>
         <Title>마피아 게임</Title>
         <GameTimer seconds={gameState.timer} phase={gameState.phase} />

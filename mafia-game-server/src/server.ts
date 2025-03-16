@@ -922,8 +922,12 @@ function processNightActions(roomId: string) {
   const room = rooms[roomId];
   if (!room) return;
   
+  console.log(`밤 행동 결과 처리 시작 - 방 ID: ${roomId}, 현재 단계: ${room.phase}`);
+  
   const killedPlayerId = room.nightActions.mafiaKill;
   const savedPlayerId = room.nightActions.doctorSave;
+  
+  console.log(`마피아 살인 대상: ${killedPlayerId || '없음'}, 의사 보호 대상: ${savedPlayerId || '없음'}`);
   
   // 시스템 메시지 생성
   const messages: ChatMessage[] = [];
@@ -942,6 +946,7 @@ function processNightActions(roomId: string) {
           timestamp: Date.now(),
           isSystemMessage: true,
         });
+        console.log(`의사가 ${killedPlayer.name}(${killedPlayer.role})를 살렸습니다.`);
       } else {
         // 마피아가 죽인 경우
         killedPlayer.isAlive = false;
@@ -953,6 +958,7 @@ function processNightActions(roomId: string) {
           timestamp: Date.now(),
           isSystemMessage: true,
         });
+        console.log(`마피아가 ${killedPlayer.name}(${killedPlayer.role})를 죽였습니다.`);
       }
     }
   } else {
@@ -964,6 +970,7 @@ function processNightActions(roomId: string) {
       timestamp: Date.now(),
       isSystemMessage: true,
     });
+    console.log('마피아가 아무도 죽이지 않았습니다.');
   }
   
   // 낮 토론 단계로 전환
@@ -983,29 +990,15 @@ function processNightActions(roomId: string) {
   };
   
   // 승리 조건 확인
-  checkWinCondition(roomId);
+  const winner = checkWinCondition(roomId);
   
-  if (!room.winner) {
-    const dayMessage: ChatMessage = {
-      id: `msg-${Date.now() + 1}`,
-      senderId: 'system',
-      senderName: '시스템',
-      content: '낮이 되었습니다. 마피아를 찾기 위해 토론하세요.',
-      timestamp: Date.now() + 1,
-      isSystemMessage: true,
-    };
+  // 게임이 끝나지 않았다면 낮 단계 진행
+  if (!winner) {
+    console.log(`밤 단계 종료, 낮 토론 단계로 전환 (${room.day}일차)`);
     
-    room.messages.push(dayMessage);
-    
-    // 낮 시작 이벤트 발송
+    // 게임 상태 업데이트 전송
+    io.to(roomId).emit('game_state_update', room);
     io.to(roomId).emit('dayStarted', { gameState: room });
-    
-    // 게임 상태 업데이트 이벤트도 함께 발송
-    io.to(roomId).emit('game_state_update', { gameState: room });
-    
-    console.log(`방 ${roomId}에서 낮이 시작됨 (${room.day}일차)`);
-    
-    // 타이머 시작
     startTimer(roomId);
   }
 }
@@ -1039,11 +1032,15 @@ function processVotingResults(roomId: string) {
   const room = rooms[roomId];
   if (!room) return;
   
+  console.log(`투표 결과 처리 시작 - 방 ID: ${roomId}, 현재 단계: ${room.phase}`);
+  
   // 투표 집계
   const voteCounts: Record<string, number> = {};
   Object.values(room.votingResults).forEach(targetId => {
     voteCounts[targetId] = (voteCounts[targetId] || 0) + 1;
   });
+  
+  console.log('투표 결과:', voteCounts);
   
   // 가장 많은 표를 받은 플레이어 찾기
   let maxVotes = 0;
@@ -1063,6 +1060,7 @@ function processVotingResults(roomId: string) {
   
   if (tiedPlayers.length > 1) {
     executedPlayerId = null; // 동점인 경우 처형 없음
+    console.log('투표 동점으로 처형 없음');
   }
   
   // 투표 결과 메시지 생성
@@ -1101,6 +1099,8 @@ function processVotingResults(roomId: string) {
         timestamp: Date.now() + 1,
         isSystemMessage: true,
       });
+      
+      console.log(`플레이어 ${executedPlayer.name}(${executedPlayer.role}) 처형됨`);
     }
   } else {
     messages.push({
@@ -1126,18 +1126,23 @@ function processVotingResults(roomId: string) {
     executedPlayerId: executedPlayerId
   });
   
+  // 게임 상태 업데이트 전송
+  io.to(roomId).emit('game_state_update', room);
+  
   // 타이머 시작
   startTimer(roomId, () => {
     // 타이머 종료 후 승리 조건 확인
-    checkWinCondition(roomId);
+    const winner = checkWinCondition(roomId);
     
     // 게임이 끝나지 않았다면 밤 단계로 전환
-    if (room && !room.winner) {
+    if (room && !winner) {
+      console.log(`투표 결과 단계 종료, 밤 단계로 전환 (${room.day + 1}일차)`);
+      
       // 밤 단계로 전환
       room.phase = 'night';
       room.nightPhase = 'doctor'; // 의사부터 시작
       room.day++;
-      room.timer = 10; // 의사 10초로 변경
+      room.timer = 30; // 의사 30초로 변경
       
       const nightMessage: ChatMessage = {
         id: `msg-${Date.now()}`,
@@ -1150,6 +1155,8 @@ function processVotingResults(roomId: string) {
       
       room.messages.push(nightMessage);
       
+      // 게임 상태 업데이트 전송
+      io.to(roomId).emit('game_state_update', room);
       io.to(roomId).emit('nightStarted', { gameState: room });
       startTimer(roomId);
     }
@@ -1163,17 +1170,22 @@ function checkWinCondition(roomId: string) {
   
   const alivePlayers = room.players.filter(p => p.isAlive);
   const aliveMafia = alivePlayers.filter(p => p.role === 'mafia');
+  // 시민 수 계산 수정: 마피아가 아닌 모든 역할(의사, 경찰, 시민)을 시민팀으로 간주
   const aliveCitizens = alivePlayers.filter(p => p.role !== 'mafia');
   
   let winner: 'citizens' | 'mafia' | null = null;
   
+  console.log(`승리 조건 확인: 전체 생존자 ${alivePlayers.length}명, 마피아 ${aliveMafia.length}명, 시민팀 ${aliveCitizens.length}명`);
+  
   // 마피아가 모두 죽었으면 시민 승리
   if (aliveMafia.length === 0) {
     winner = 'citizens';
+    console.log('마피아가 모두 죽어 시민팀 승리');
   }
   // 마피아 수가 시민 수 이상이면 마피아 승리
   else if (aliveMafia.length >= aliveCitizens.length) {
     winner = 'mafia';
+    console.log('마피아 수가 시민팀 수 이상이 되어 마피아 승리');
   }
   
   if (winner) {
@@ -1190,8 +1202,11 @@ function checkWinCondition(roomId: string) {
     };
     
     room.messages.push(message);
+    io.to(roomId).emit('game_state_update', room);
     io.to(roomId).emit('gameOver', { gameState: room });
   }
+  
+  return winner;
 }
 
 // 역할 텍스트 변환

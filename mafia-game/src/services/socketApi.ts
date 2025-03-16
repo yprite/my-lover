@@ -195,7 +195,6 @@ export const setupSocketListeners = (
 
   // 타이머 업데이트
   socket.on('timer_updated', (data: { timer: number }) => {
-    console.log('타이머 업데이트:', data.timer);
     if (callbacks.onTimerUpdated) {
       callbacks.onTimerUpdated(data.timer);
     }

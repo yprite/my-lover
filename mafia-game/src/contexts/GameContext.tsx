@@ -99,7 +99,6 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         console.log(`게임이 종료되었습니다. 승자: ${winner}`);
       },
       onTimerUpdated: (timer: number) => {
-        console.log(`타이머 업데이트: ${timer}`);
         if (gameState) {
           setGameState({
             ...gameState,
@@ -270,12 +269,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const getCurrentPlayer = (): Player | undefined => {
-    const player = getPlayerById(user.id);
-    console.log('getCurrentPlayer 호출:', { 
-      userId: user.id, 
-      player, 
-      allPlayers: gameState?.players 
-    });
+    const player = getPlayerById(user.id)
     return player;
   };
 
