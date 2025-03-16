@@ -138,7 +138,7 @@ const GamePage: React.FC = () => {
       setVoteResults(data.voteCounts);
       setExecutedPlayerId(data.executedPlayerId);
       
-      // 게임 상태 업데이트
+    // 게임 상태 업데이트
       if (data.gameState) {
         setGameState(data.gameState);
       }
@@ -166,27 +166,39 @@ const GamePage: React.FC = () => {
       socket.on('vote_result', handleVoteResult);
       socket.on('vote_updated', handleVoteUpdated);
       socket.on('game_state_update', handleGameStateUpdate);
-      
+    
       // 컴포넌트 언마운트 시 이벤트 리스너 제거
-      return () => {
+    return () => {
         socket.off('vote_result', handleVoteResult);
         socket.off('vote_updated', handleVoteUpdated);
         socket.off('game_state_update', handleGameStateUpdate);
-      };
+    };
     }
   }, [gameState, setGameState]);
   
+  // 게임 상태가 없거나 플레이어를 찾을 수 없는 경우의 처리
   if (!gameState) {
-    console.error('GamePage: gameState가 없습니다.');
-    navigate('/lobby');
-    return null;
+    return (
+      <Container>
+        <Card>
+          <Title>게임 오류</Title>
+          <Text style={{ textAlign: 'center', marginBottom: '20px' }}>
+            게임 상태를 불러올 수 없습니다.
+          </Text>
+          <Button onClick={() => window.location.reload()}>
+            게임 재시작
+          </Button>
+        </Card>
+      </Container>
+    );
   }
   
   console.log('GamePage: 게임 상태', gameState);
   
   const currentPlayer = getCurrentPlayer();
-  console.log('GamePage: 현재 플레이어', currentPlayer);
+  // console.log('GamePage: 현재 플레이어', currentPlayer);
   
+  // 플레이어를 찾을 수 없는 경우의 처리
   if (!currentPlayer) {
     console.error('GamePage: currentPlayer가 없습니다. 유저 ID:', user.id);
     console.log('GamePage: 모든 플레이어', gameState.players);
@@ -195,13 +207,20 @@ const GamePage: React.FC = () => {
     const playerInRoom = gameState.players.find(p => p.id === user.id);
     console.log('GamePage: 직접 찾은 플레이어', playerInRoom);
     
-    if (playerInRoom) {
-      // 플레이어를 찾았으면 계속 진행
-      console.log('GamePage: 플레이어를 직접 찾았습니다.');
-    } else {
-      // 플레이어를 찾지 못했으면 로비로 이동
-      navigate('/lobby');
-      return null;
+    if (!playerInRoom) {
+      return (
+        <Container>
+          <Card>
+            <Title>게임 오류</Title>
+            <Text style={{ textAlign: 'center', marginBottom: '20px' }}>
+              플레이어 정보를 찾을 수 없습니다.
+            </Text>
+            <Button onClick={() => window.location.reload()}>
+              게임 재시작
+            </Button>
+          </Card>
+        </Container>
+      );
     }
   }
   
@@ -209,9 +228,19 @@ const GamePage: React.FC = () => {
   const player = currentPlayer || gameState.players.find(p => p.id === user.id);
   
   if (!player) {
-    console.error('GamePage: 플레이어를 찾을 수 없습니다.');
-    navigate('/lobby');
-    return null;
+    return (
+      <Container>
+        <Card>
+          <Title>게임 오류</Title>
+          <Text style={{ textAlign: 'center', marginBottom: '20px' }}>
+            플레이어 정보를 찾을 수 없습니다.
+          </Text>
+          <Button onClick={() => window.location.reload()}>
+            게임 재시작
+          </Button>
+        </Card>
+      </Container>
+    );
   }
   
   const isNight = gameState.phase === 'night';
@@ -589,6 +618,18 @@ const GamePage: React.FC = () => {
           {getPhaseDescription()}
         </Text>
         
+        {/* 게임 종료 상태 표시 */}
+        {isGameOver && (
+          <Card style={{ backgroundColor: '#f8f9fa', marginBottom: '20px', padding: '20px' }}>
+            <Text style={{ textAlign: 'center', fontSize: '24px', fontWeight: 'bold', color: gameState.winner === 'citizens' ? '#2ecc71' : '#e74c3c' }}>
+              {gameState.winner === 'citizens' ? '시민팀 승리!' : '마피아팀이 승리했습니다!'}
+            </Text>
+            <Text style={{ textAlign: 'center', marginTop: '10px' }}>
+              게임이 종료되었습니다. 방장이 새로운 게임을 시작할 때까지 기다려주세요.
+            </Text>
+          </Card>
+        )}
+        
         {/* 플레이어 행동 상태 표시 */}
         {(isDayVoting || isNight) && canPlayerActNow() && !hasPlayerActed() && (
           <Text style={{ textAlign: 'center', color: '#e74c3c', fontWeight: 'bold', marginBottom: '10px' }}>
@@ -644,15 +685,6 @@ const GamePage: React.FC = () => {
               <Text style={{ marginTop: '20px', color: '#2ecc71' }}>
                 행동을 완료했습니다. 다른 플레이어를 기다리고 있습니다.
               </Text>
-            )}
-            
-            {isGameOver && (
-              <Button 
-                onClick={() => navigate('/lobby')} 
-                style={{ marginTop: '20px' }}
-              >
-                로비로 돌아가기
-              </Button>
             )}
           </Card>
           

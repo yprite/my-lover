@@ -257,7 +257,6 @@ export const setupSocketListeners = (
 
   // 투표 업데이트
   socket.on('vote_updated', (data: { gameState: GameState }) => {
-    console.log('투표 업데이트됨:', data.gameState);
     if (callbacks.onGameStateUpdate) {
       callbacks.onGameStateUpdate(data.gameState);
     }

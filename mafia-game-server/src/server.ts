@@ -322,7 +322,10 @@ io.on('connection', (socket) => {
           }
           
           if (success) {
+            // 밤 행동 수행 이벤트 발생
             io.to(roomId).emit('night_action_performed', { gameState: room });
+            
+            // 콜백 함수 호출
             callback({ success: true, result });
             
             // 모든 밤 행동이 완료되었는지 확인
@@ -1119,6 +1122,15 @@ function processVotingResults(roomId: string) {
   room.phase = 'vote-result';
   room.timer = 10; // 10초 동안 결과 표시
   
+  // 승리 조건 확인
+  const winner = checkWinCondition(roomId);
+  
+  if (winner) {
+    // 승자가 결정된 경우 게임 종료
+    console.log('게임 종료 - 승자:', winner);
+    return;
+  }
+  
   // 투표 결과 정보를 클라이언트에 전송
   io.to(roomId).emit('vote_result', { 
     gameState: room,
@@ -1126,40 +1138,32 @@ function processVotingResults(roomId: string) {
     executedPlayerId: executedPlayerId
   });
   
-  // 게임 상태 업데이트 전송
-  io.to(roomId).emit('game_state_update', room);
-  
   // 타이머 시작
   startTimer(roomId, () => {
-    // 타이머 종료 후 승리 조건 확인
-    const winner = checkWinCondition(roomId);
+    // 타이머 종료 후 밤 단계로 전환
+    console.log(`투표 결과 단계 종료, 밤 단계로 전환 (${room.day + 1}일차)`);
     
-    // 게임이 끝나지 않았다면 밤 단계로 전환
-    if (room && !winner) {
-      console.log(`투표 결과 단계 종료, 밤 단계로 전환 (${room.day + 1}일차)`);
-      
-      // 밤 단계로 전환
-      room.phase = 'night';
-      room.nightPhase = 'doctor'; // 의사부터 시작
-      room.day++;
-      room.timer = 30; // 의사 30초로 변경
-      
-      const nightMessage: ChatMessage = {
-        id: `msg-${Date.now()}`,
-        senderId: 'system',
-        senderName: '시스템',
-        content: '밤이 되었습니다. 의사가 시민을 살리고 있습니다.',
-        timestamp: Date.now(),
-        isSystemMessage: true,
-      };
-      
-      room.messages.push(nightMessage);
-      
-      // 게임 상태 업데이트 전송
-      io.to(roomId).emit('game_state_update', room);
-      io.to(roomId).emit('nightStarted', { gameState: room });
-      startTimer(roomId);
-    }
+    // 밤 단계로 전환
+    room.phase = 'night';
+    room.nightPhase = 'doctor'; // 의사부터 시작
+    room.day++;
+    room.timer = 30; // 의사 30초로 변경
+    
+    const nightMessage: ChatMessage = {
+      id: `msg-${Date.now()}`,
+      senderId: 'system',
+      senderName: '시스템',
+      content: '밤이 되었습니다. 의사가 시민을 살리고 있습니다.',
+      timestamp: Date.now(),
+      isSystemMessage: true,
+    };
+    
+    room.messages.push(nightMessage);
+    
+    // 게임 상태 업데이트 전송
+    io.to(roomId).emit('game_state_update', room);
+    io.to(roomId).emit('nightStarted', { gameState: room });
+    startTimer(roomId);
   });
 }
 
